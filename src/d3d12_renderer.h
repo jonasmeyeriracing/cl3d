@@ -130,6 +130,7 @@ struct D3D12Renderer
 
     // Car AABB for top-down rendering
     AABB carAABB;
+    Mat4 topDownViewProj;
 };
 
 bool D3D12_Init(D3D12Renderer* renderer, HWND hwnd, uint32_t width, uint32_t height);

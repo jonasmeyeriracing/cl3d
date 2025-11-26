@@ -521,6 +521,35 @@ static bool CreateGeometry(D3D12Renderer* renderer)
         }
     }
 
+    // Calculate top-down orthographic view-projection matrix from AABB
+    // Looking down from above (-Y direction), with Z as "up" in the view
+    float aabbHeight = renderer->carAABB.max.y - renderer->carAABB.min.y;
+
+    // Add some padding
+    float padding = 5.0f;
+    float left = renderer->carAABB.min.x - padding;
+    float right = renderer->carAABB.max.x + padding;
+    float bottom = renderer->carAABB.min.z - padding;
+    float top = renderer->carAABB.max.z + padding;
+
+    // Near/far for looking down (Y axis range + padding)
+    float nearZ = 0.1f;
+    float farZ = aabbHeight + 100.0f;
+
+    // Create top-down view matrix (looking down from above)
+    float viewHeight = renderer->carAABB.max.y + 50.0f;
+    Vec3 eyePos(
+        (renderer->carAABB.min.x + renderer->carAABB.max.x) * 0.5f,
+        viewHeight,
+        (renderer->carAABB.min.z + renderer->carAABB.max.z) * 0.5f
+    );
+    Vec3 targetPos(eyePos.x, 0, eyePos.z);
+    Vec3 upDir(0, 0, -1);  // Z- is "up" when looking down
+
+    Mat4 topDownView = Mat4::lookAt(eyePos, targetPos, upDir);
+    Mat4 topDownProj = Mat4::orthographic(left, right, bottom, top, nearZ, farZ);
+    renderer->topDownViewProj = topDownProj * topDownView;
+
     renderer->indexCount = (uint32_t)indices.size();
 
     UINT vertexBufferSize = (UINT)(vertices.size() * sizeof(Vertex));

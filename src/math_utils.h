@@ -73,6 +73,19 @@ struct Mat4
         return result;
     }
 
+    static Mat4 orthographic(float left, float right, float bottom, float top, float nearZ, float farZ)
+    {
+        Mat4 result;
+        result.m[0] = 2.0f / (right - left);
+        result.m[5] = 2.0f / (top - bottom);
+        result.m[10] = 1.0f / (nearZ - farZ);
+        result.m[12] = (left + right) / (left - right);
+        result.m[13] = (top + bottom) / (bottom - top);
+        result.m[14] = nearZ / (nearZ - farZ);
+        result.m[15] = 1.0f;
+        return result;
+    }
+
     Mat4 operator*(const Mat4& other) const
     {
         Mat4 result;
