@@ -372,6 +372,16 @@ static bool CreateGeometry(D3D12Renderer* renderer)
     // Start position (in front of camera)
     const float startZ = 0.0f;
 
+    // Headlight parameters
+    const float headlightHeight = 0.6f;           // Height from ground
+    const float headlightSpacing = 0.7f;          // Distance from center (each side)
+    const float headlightRange = 30.0f;           // 30 meters range
+    const float headlightInnerAngle = 0.15f;      // ~8.5 degrees inner cone
+    const float headlightOuterAngle = 0.35f;      // ~20 degrees outer cone
+    const Vec3 headlightColor(1.5f, 1.4f, 1.2f);  // Warm white, slightly bright
+
+    renderer->numConeLights = 0;
+
     for (int i = 0; i < numCars; i++)
     {
         int row = i / carsPerRow;
@@ -382,6 +392,34 @@ static bool CreateGeometry(D3D12Renderer* renderer)
         float z = startZ - row * spacingZ;
 
         AddBox(vertices, indices, x, y, z, carWidth, carHeight, carLength);
+
+        // Add two headlights for this car
+        // Headlights are at the front of the car (-Z direction)
+        float frontZ = z - carLength * 0.5f;
+
+        // Left headlight
+        if (renderer->numConeLights < MAX_CONE_LIGHTS)
+        {
+            ConeLight& light = renderer->coneLights[renderer->numConeLights++];
+            light.position = Vec3(x - headlightSpacing, headlightHeight, frontZ);
+            light.direction = Vec3(0, 0, -1);  // Pointing forward (-Z)
+            light.color = headlightColor;
+            light.range = headlightRange;
+            light.innerAngle = headlightInnerAngle;
+            light.outerAngle = headlightOuterAngle;
+        }
+
+        // Right headlight
+        if (renderer->numConeLights < MAX_CONE_LIGHTS)
+        {
+            ConeLight& light = renderer->coneLights[renderer->numConeLights++];
+            light.position = Vec3(x + headlightSpacing, headlightHeight, frontZ);
+            light.direction = Vec3(0, 0, -1);  // Pointing forward (-Z)
+            light.color = headlightColor;
+            light.range = headlightRange;
+            light.innerAngle = headlightInnerAngle;
+            light.outerAngle = headlightOuterAngle;
+        }
     }
 
     renderer->indexCount = (uint32_t)indices.size();
