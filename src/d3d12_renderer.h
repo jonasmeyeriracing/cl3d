@@ -55,6 +55,12 @@ struct CameraConstants
     float padding[2];
 };
 
+struct AABB
+{
+    Vec3 min;
+    Vec3 max;
+};
+
 struct D3D12Renderer
 {
     // Core D3D12 objects
@@ -121,6 +127,9 @@ struct D3D12Renderer
     // Lighting controls
     float ambientIntensity = 0.3f;
     float coneLightIntensity = 1.0f;
+
+    // Car AABB for top-down rendering
+    AABB carAABB;
 };
 
 bool D3D12_Init(D3D12Renderer* renderer, HWND hwnd, uint32_t width, uint32_t height);

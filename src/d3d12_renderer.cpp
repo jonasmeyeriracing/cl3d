@@ -2,6 +2,7 @@
 #include <d3dcompiler.h>
 #include <cstdio>
 #include <cmath>
+#include <cfloat>
 #include <vector>
 
 #include "imgui.h"
@@ -465,6 +466,10 @@ static bool CreateGeometry(D3D12Renderer* renderer)
 
     renderer->numConeLights = 0;
 
+    // Initialize AABB
+    renderer->carAABB.min = Vec3(FLT_MAX, FLT_MAX, FLT_MAX);
+    renderer->carAABB.max = Vec3(-FLT_MAX, -FLT_MAX, -FLT_MAX);
+
     for (int i = 0; i < numCars; i++)
     {
         int row = i / carsPerRow;
@@ -475,6 +480,17 @@ static bool CreateGeometry(D3D12Renderer* renderer)
         float z = startZ - row * spacingZ;
 
         AddBox(vertices, indices, x, y, z, carWidth, carHeight, carLength);
+
+        // Update AABB to include this car
+        Vec3 carMin(x - carWidth * 0.5f, 0, z - carLength * 0.5f);
+        Vec3 carMax(x + carWidth * 0.5f, carHeight, z + carLength * 0.5f);
+
+        if (carMin.x < renderer->carAABB.min.x) renderer->carAABB.min.x = carMin.x;
+        if (carMin.y < renderer->carAABB.min.y) renderer->carAABB.min.y = carMin.y;
+        if (carMin.z < renderer->carAABB.min.z) renderer->carAABB.min.z = carMin.z;
+        if (carMax.x > renderer->carAABB.max.x) renderer->carAABB.max.x = carMax.x;
+        if (carMax.y > renderer->carAABB.max.y) renderer->carAABB.max.y = carMax.y;
+        if (carMax.z > renderer->carAABB.max.z) renderer->carAABB.max.z = carMax.z;
 
         // Add two headlights for this car
         // Headlights are at the front of the car (-Z direction)
