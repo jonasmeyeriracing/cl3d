@@ -151,6 +151,10 @@ static void DrawImGui(float deltaTime)
 
     ImGui::PlotLines("##FrameTime", plotData, FRAME_TIME_HISTORY_SIZE, 0, nullptr, 0.0f, maxFrameTime * 1.2f, ImVec2(0, 60));
 
+    ImGui::Separator();
+    ImGui::Checkbox("Show Headlight Debug", &g_Renderer.showDebugLights);
+    ImGui::Text("Cone Lights: %u", g_Renderer.numConeLights);
+
     ImGui::End();
 }
 

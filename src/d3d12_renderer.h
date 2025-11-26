@@ -39,6 +39,12 @@ struct Vertex
     float uv[2];
 };
 
+struct DebugVertex
+{
+    float position[3];
+    float color[3];
+};
+
 struct CameraConstants
 {
     Mat4 viewProjection;
@@ -101,6 +107,13 @@ struct D3D12Renderer
 
     // Camera
     Camera camera;
+
+    // Debug visualization
+    bool showDebugLights = false;
+    ComPtr<ID3D12PipelineState>     debugPipelineState;
+    ComPtr<ID3D12Resource>          debugVertexBuffer;
+    D3D12_VERTEX_BUFFER_VIEW        debugVertexBufferView;
+    uint32_t                        debugVertexCount = 0;
 };
 
 bool D3D12_Init(D3D12Renderer* renderer, HWND hwnd, uint32_t width, uint32_t height);

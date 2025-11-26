@@ -177,6 +177,40 @@ float4 PSMain(PSInput input) : SV_TARGET
 }
 )";
 
+static const char* g_DebugShaderSource = R"(
+cbuffer CameraConstants : register(b0)
+{
+    float4x4 viewProjection;
+    float3 cameraPos;
+    float padding;
+};
+
+struct VSInput
+{
+    float3 position : POSITION;
+    float3 color : COLOR;
+};
+
+struct PSInput
+{
+    float4 position : SV_POSITION;
+    float3 color : COLOR;
+};
+
+PSInput VSMain(VSInput input)
+{
+    PSInput output;
+    output.position = mul(viewProjection, float4(input.position, 1.0));
+    output.color = input.color;
+    return output;
+}
+
+float4 PSMain(PSInput input) : SV_TARGET
+{
+    return float4(input.color, 1.0);
+}
+)";
+
 static bool CreatePipelineState(D3D12Renderer* renderer)
 {
     // Create root signature with CBV for camera constants and SRV for cone lights
@@ -267,6 +301,52 @@ static bool CreatePipelineState(D3D12Renderer* renderer)
     if (FAILED(renderer->device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&renderer->pipelineState))))
     {
         OutputDebugStringA("Failed to create PSO\n");
+        return false;
+    }
+
+    // Create debug wireframe PSO
+    ComPtr<ID3DBlob> debugVS, debugPS;
+    if (FAILED(D3DCompile(g_DebugShaderSource, strlen(g_DebugShaderSource), "debug.hlsl", nullptr, nullptr,
+        "VSMain", "vs_5_0", compileFlags, 0, &debugVS, &error)))
+    {
+        if (error) OutputDebugStringA((char*)error->GetBufferPointer());
+        return false;
+    }
+
+    if (FAILED(D3DCompile(g_DebugShaderSource, strlen(g_DebugShaderSource), "debug.hlsl", nullptr, nullptr,
+        "PSMain", "ps_5_0", compileFlags, 0, &debugPS, &error)))
+    {
+        if (error) OutputDebugStringA((char*)error->GetBufferPointer());
+        return false;
+    }
+
+    D3D12_INPUT_ELEMENT_DESC debugInputLayout[] = {
+        { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0,  D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+        { "COLOR",    0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+    };
+
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC debugPsoDesc = {};
+    debugPsoDesc.InputLayout = { debugInputLayout, _countof(debugInputLayout) };
+    debugPsoDesc.pRootSignature = renderer->rootSignature.Get();
+    debugPsoDesc.VS = { debugVS->GetBufferPointer(), debugVS->GetBufferSize() };
+    debugPsoDesc.PS = { debugPS->GetBufferPointer(), debugPS->GetBufferSize() };
+    debugPsoDesc.RasterizerState.FillMode = D3D12_FILL_MODE_WIREFRAME;
+    debugPsoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+    debugPsoDesc.RasterizerState.DepthClipEnable = TRUE;
+    debugPsoDesc.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+    debugPsoDesc.DepthStencilState.DepthEnable = TRUE;
+    debugPsoDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+    debugPsoDesc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+    debugPsoDesc.SampleMask = UINT_MAX;
+    debugPsoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_LINE;
+    debugPsoDesc.NumRenderTargets = 1;
+    debugPsoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+    debugPsoDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
+    debugPsoDesc.SampleDesc.Count = 1;
+
+    if (FAILED(renderer->device->CreateGraphicsPipelineState(&debugPsoDesc, IID_PPV_ARGS(&renderer->debugPipelineState))))
+    {
+        OutputDebugStringA("Failed to create debug PSO\n");
         return false;
     }
 
@@ -475,6 +555,93 @@ static bool CreateGeometry(D3D12Renderer* renderer)
     renderer->indexBufferView.BufferLocation = renderer->indexBuffer->GetGPUVirtualAddress();
     renderer->indexBufferView.SizeInBytes = indexBufferSize;
     renderer->indexBufferView.Format = DXGI_FORMAT_R32_UINT;
+
+    return true;
+}
+
+static bool CreateDebugGeometry(D3D12Renderer* renderer)
+{
+    std::vector<DebugVertex> debugVerts;
+    const int coneSegments = 16;
+    const Vec3 coneColor(1.0f, 1.0f, 0.0f);  // Yellow for cone wireframe
+
+    for (uint32_t i = 0; i < renderer->numConeLights; ++i)
+    {
+        const ConeLight& light = renderer->coneLights[i];
+        Vec3 pos = light.position;
+        Vec3 dir = light.direction;
+        float range = light.range;
+        float outerAngle = light.outerAngle;
+
+        // Calculate basis vectors perpendicular to direction
+        Vec3 up = (fabsf(dir.y) < 0.99f) ? Vec3(0, 1, 0) : Vec3(1, 0, 0);
+        Vec3 right = cross(dir, up).normalized();
+        up = cross(right, dir).normalized();
+
+        // Cone end radius at range distance
+        float endRadius = range * tanf(outerAngle);
+
+        // Draw lines from apex to cone circle
+        for (int j = 0; j < coneSegments; ++j)
+        {
+            float angle = (float)j / (float)coneSegments * 6.28318f;
+            float nextAngle = (float)(j + 1) / (float)coneSegments * 6.28318f;
+
+            Vec3 offset1 = right * (cosf(angle) * endRadius) + up * (sinf(angle) * endRadius);
+            Vec3 offset2 = right * (cosf(nextAngle) * endRadius) + up * (sinf(nextAngle) * endRadius);
+
+            Vec3 endPoint1 = pos + dir * range + offset1;
+            Vec3 endPoint2 = pos + dir * range + offset2;
+
+            // Line from apex to edge
+            debugVerts.push_back({{pos.x, pos.y, pos.z}, {coneColor.x, coneColor.y, coneColor.z}});
+            debugVerts.push_back({{endPoint1.x, endPoint1.y, endPoint1.z}, {coneColor.x, coneColor.y, coneColor.z}});
+
+            // Line around the circle edge
+            debugVerts.push_back({{endPoint1.x, endPoint1.y, endPoint1.z}, {coneColor.x, coneColor.y, coneColor.z}});
+            debugVerts.push_back({{endPoint2.x, endPoint2.y, endPoint2.z}, {coneColor.x, coneColor.y, coneColor.z}});
+        }
+
+        // Direction line (center axis)
+        Vec3 endCenter = pos + dir * range;
+        debugVerts.push_back({{pos.x, pos.y, pos.z}, {1.0f, 0.0f, 0.0f}});  // Red for center
+        debugVerts.push_back({{endCenter.x, endCenter.y, endCenter.z}, {1.0f, 0.0f, 0.0f}});
+    }
+
+    if (debugVerts.empty())
+        return true;
+
+    renderer->debugVertexCount = (uint32_t)debugVerts.size();
+    UINT bufferSize = (UINT)(debugVerts.size() * sizeof(DebugVertex));
+
+    D3D12_HEAP_PROPERTIES heapProps = {};
+    heapProps.Type = D3D12_HEAP_TYPE_UPLOAD;
+
+    D3D12_RESOURCE_DESC bufferDesc = {};
+    bufferDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    bufferDesc.Width = bufferSize;
+    bufferDesc.Height = 1;
+    bufferDesc.DepthOrArraySize = 1;
+    bufferDesc.MipLevels = 1;
+    bufferDesc.SampleDesc.Count = 1;
+    bufferDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+
+    if (FAILED(renderer->device->CreateCommittedResource(
+        &heapProps, D3D12_HEAP_FLAG_NONE, &bufferDesc,
+        D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
+        IID_PPV_ARGS(&renderer->debugVertexBuffer))))
+    {
+        return false;
+    }
+
+    void* mappedData;
+    renderer->debugVertexBuffer->Map(0, nullptr, &mappedData);
+    memcpy(mappedData, debugVerts.data(), bufferSize);
+    renderer->debugVertexBuffer->Unmap(0, nullptr);
+
+    renderer->debugVertexBufferView.BufferLocation = renderer->debugVertexBuffer->GetGPUVirtualAddress();
+    renderer->debugVertexBufferView.SizeInBytes = bufferSize;
+    renderer->debugVertexBufferView.StrideInBytes = sizeof(DebugVertex);
 
     return true;
 }
@@ -702,6 +869,13 @@ bool D3D12_Init(D3D12Renderer* renderer, HWND hwnd, uint32_t width, uint32_t hei
         return false;
     }
 
+    // Create debug geometry (after main geometry creates cone lights)
+    if (!CreateDebugGeometry(renderer))
+    {
+        OutputDebugStringA("Failed to create debug geometry\n");
+        return false;
+    }
+
     // Create constant buffers
     if (!CreateConstantBuffers(renderer))
     {
@@ -852,11 +1026,20 @@ void D3D12_Render(D3D12Renderer* renderer)
     D3D12_RECT scissorRect = { 0, 0, (LONG)renderer->width, (LONG)renderer->height };
     renderer->commandList->RSSetScissorRects(1, &scissorRect);
 
-    // Draw plane
+    // Draw scene
     renderer->commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     renderer->commandList->IASetVertexBuffers(0, 1, &renderer->vertexBufferView);
     renderer->commandList->IASetIndexBuffer(&renderer->indexBufferView);
     renderer->commandList->DrawIndexedInstanced(renderer->indexCount, 1, 0, 0, 0);
+
+    // Draw debug cone wireframes if enabled
+    if (renderer->showDebugLights && renderer->debugVertexCount > 0)
+    {
+        renderer->commandList->SetPipelineState(renderer->debugPipelineState.Get());
+        renderer->commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_LINELIST);
+        renderer->commandList->IASetVertexBuffers(0, 1, &renderer->debugVertexBufferView);
+        renderer->commandList->DrawInstanced(renderer->debugVertexCount, 1, 0, 0);
+    }
 
     // Render ImGui
     ID3D12DescriptorHeap* descriptorHeaps[] = { renderer->imguiSrvHeap.Get() };
