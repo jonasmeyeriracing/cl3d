@@ -131,6 +131,12 @@ struct D3D12Renderer
     // Car AABB for top-down rendering
     AABB carAABB;
     Mat4 topDownViewProj;
+
+    // Offscreen depth buffer for top-down view (1024x1024)
+    static constexpr uint32_t SHADOW_MAP_SIZE = 1024;
+    ComPtr<ID3D12Resource>          shadowDepthBuffer;
+    ComPtr<ID3D12PipelineState>     shadowPipelineState;
+    bool showShadowMapDebug = false;
 };
 
 bool D3D12_Init(D3D12Renderer* renderer, HWND hwnd, uint32_t width, uint32_t height);

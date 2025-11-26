@@ -74,6 +74,49 @@ static bool CreateDepthBuffer(D3D12Renderer* renderer)
     return true;
 }
 
+static bool CreateShadowDepthBuffer(D3D12Renderer* renderer)
+{
+    D3D12_HEAP_PROPERTIES heapProps = {};
+    heapProps.Type = D3D12_HEAP_TYPE_DEFAULT;
+
+    D3D12_RESOURCE_DESC depthDesc = {};
+    depthDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    depthDesc.Width = D3D12Renderer::SHADOW_MAP_SIZE;
+    depthDesc.Height = D3D12Renderer::SHADOW_MAP_SIZE;
+    depthDesc.DepthOrArraySize = 1;
+    depthDesc.MipLevels = 1;
+    depthDesc.Format = DXGI_FORMAT_D32_FLOAT;
+    depthDesc.SampleDesc.Count = 1;
+    depthDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+
+    D3D12_CLEAR_VALUE clearValue = {};
+    clearValue.Format = DXGI_FORMAT_D32_FLOAT;
+    clearValue.DepthStencil.Depth = 1.0f;
+
+    if (FAILED(renderer->device->CreateCommittedResource(
+        &heapProps,
+        D3D12_HEAP_FLAG_NONE,
+        &depthDesc,
+        D3D12_RESOURCE_STATE_DEPTH_WRITE,
+        &clearValue,
+        IID_PPV_ARGS(&renderer->shadowDepthBuffer))))
+    {
+        return false;
+    }
+
+    D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc = {};
+    dsvDesc.Format = DXGI_FORMAT_D32_FLOAT;
+    dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+
+    // Get second descriptor in the DSV heap for shadow map
+    UINT dsvDescriptorSize = renderer->device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
+    D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = renderer->dsvHeap->GetCPUDescriptorHandleForHeapStart();
+    dsvHandle.ptr += dsvDescriptorSize;  // Second slot for shadow map
+    renderer->device->CreateDepthStencilView(renderer->shadowDepthBuffer.Get(), &dsvDesc, dsvHandle);
+
+    return true;
+}
+
 static const char* g_ShaderSource = R"(
 cbuffer CameraConstants : register(b0)
 {
@@ -351,6 +394,31 @@ static bool CreatePipelineState(D3D12Renderer* renderer)
     if (FAILED(renderer->device->CreateGraphicsPipelineState(&debugPsoDesc, IID_PPV_ARGS(&renderer->debugPipelineState))))
     {
         OutputDebugStringA("Failed to create debug PSO\n");
+        return false;
+    }
+
+    // Create shadow map PSO (depth-only, no pixel shader)
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC shadowPsoDesc = {};
+    shadowPsoDesc.InputLayout = { inputLayout, _countof(inputLayout) };
+    shadowPsoDesc.pRootSignature = renderer->rootSignature.Get();
+    shadowPsoDesc.VS = { vertexShader->GetBufferPointer(), vertexShader->GetBufferSize() };
+    // No pixel shader - depth only
+    shadowPsoDesc.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
+    shadowPsoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_BACK;
+    shadowPsoDesc.RasterizerState.FrontCounterClockwise = FALSE;
+    shadowPsoDesc.RasterizerState.DepthClipEnable = TRUE;
+    shadowPsoDesc.DepthStencilState.DepthEnable = TRUE;
+    shadowPsoDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
+    shadowPsoDesc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
+    shadowPsoDesc.SampleMask = UINT_MAX;
+    shadowPsoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    shadowPsoDesc.NumRenderTargets = 0;  // No render target
+    shadowPsoDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
+    shadowPsoDesc.SampleDesc.Count = 1;
+
+    if (FAILED(renderer->device->CreateGraphicsPipelineState(&shadowPsoDesc, IID_PPV_ARGS(&renderer->shadowPipelineState))))
+    {
+        OutputDebugStringA("Failed to create shadow PSO\n");
         return false;
     }
 
@@ -835,9 +903,9 @@ bool D3D12_Init(D3D12Renderer* renderer, HWND hwnd, uint32_t width, uint32_t hei
 
     renderer->rtvDescriptorSize = renderer->device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 
-    // DSV heap
+    // DSV heap (2 descriptors: main depth buffer + shadow map)
     D3D12_DESCRIPTOR_HEAP_DESC dsvHeapDesc = {};
-    dsvHeapDesc.NumDescriptors = 1;
+    dsvHeapDesc.NumDescriptors = 2;
     dsvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
 
     if (FAILED(renderer->device->CreateDescriptorHeap(&dsvHeapDesc, IID_PPV_ARGS(&renderer->dsvHeap))))
@@ -900,6 +968,13 @@ bool D3D12_Init(D3D12Renderer* renderer, HWND hwnd, uint32_t width, uint32_t hei
     if (!CreateDepthBuffer(renderer))
     {
         OutputDebugStringA("Failed to create depth buffer\n");
+        return false;
+    }
+
+    // Create shadow depth buffer (1024x1024)
+    if (!CreateShadowDepthBuffer(renderer))
+    {
+        OutputDebugStringA("Failed to create shadow depth buffer\n");
         return false;
     }
 
@@ -1036,12 +1111,51 @@ void D3D12_Render(D3D12Renderer* renderer)
 
     // Reset command allocator and command list
     renderer->commandAllocators[renderer->frameIndex]->Reset();
-    renderer->commandList->Reset(renderer->commandAllocators[renderer->frameIndex].Get(), renderer->pipelineState.Get());
+    renderer->commandList->Reset(renderer->commandAllocators[renderer->frameIndex].Get(), renderer->shadowPipelineState.Get());
 
     // Set root signature
     renderer->commandList->SetGraphicsRootSignature(renderer->rootSignature.Get());
+
+    // ========== Shadow Pass (top-down depth-only) ==========
+    // Temporarily update constant buffer with top-down view-projection
+    cb->viewProjection = renderer->topDownViewProj;
+
     renderer->commandList->SetGraphicsRootConstantBufferView(0, renderer->constantBuffer[renderer->frameIndex]->GetGPUVirtualAddress());
     renderer->commandList->SetGraphicsRootShaderResourceView(1, renderer->coneLightsBuffer[renderer->frameIndex]->GetGPUVirtualAddress());
+
+    // Get shadow DSV handle (second slot in DSV heap)
+    UINT dsvDescriptorSize = renderer->device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
+    D3D12_CPU_DESCRIPTOR_HANDLE shadowDsvHandle = renderer->dsvHeap->GetCPUDescriptorHandleForHeapStart();
+    shadowDsvHandle.ptr += dsvDescriptorSize;
+
+    // Clear shadow depth buffer
+    renderer->commandList->ClearDepthStencilView(shadowDsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+
+    // Set render target (depth only, no color target)
+    renderer->commandList->OMSetRenderTargets(0, nullptr, FALSE, &shadowDsvHandle);
+
+    // Set viewport and scissor for shadow map
+    D3D12_VIEWPORT shadowViewport = {};
+    shadowViewport.Width = (float)D3D12Renderer::SHADOW_MAP_SIZE;
+    shadowViewport.Height = (float)D3D12Renderer::SHADOW_MAP_SIZE;
+    shadowViewport.MaxDepth = 1.0f;
+    renderer->commandList->RSSetViewports(1, &shadowViewport);
+
+    D3D12_RECT shadowScissorRect = { 0, 0, (LONG)D3D12Renderer::SHADOW_MAP_SIZE, (LONG)D3D12Renderer::SHADOW_MAP_SIZE };
+    renderer->commandList->RSSetScissorRects(1, &shadowScissorRect);
+
+    // Draw scene to shadow map
+    renderer->commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    renderer->commandList->IASetVertexBuffers(0, 1, &renderer->vertexBufferView);
+    renderer->commandList->IASetIndexBuffer(&renderer->indexBufferView);
+    renderer->commandList->DrawIndexedInstanced(renderer->indexCount, 1, 0, 0, 0);
+
+    // ========== Main Render Pass ==========
+    // Restore main camera view-projection
+    cb->viewProjection = renderer->camera.getViewProjectionMatrix(aspect);
+
+    renderer->commandList->SetPipelineState(renderer->pipelineState.Get());
+    renderer->commandList->SetGraphicsRootConstantBufferView(0, renderer->constantBuffer[renderer->frameIndex]->GetGPUVirtualAddress());
 
     // Transition render target
     D3D12_RESOURCE_BARRIER barrier = {};
