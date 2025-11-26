@@ -1,0 +1,14 @@
+# Build output
+bin/
+obj/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+
+# ImGui config (user-specific)
+imgui.ini
+
+# Claude Code local settings
+.claude/settings.local.json
