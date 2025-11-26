@@ -1,6 +1,7 @@
 #include "d3d12_renderer.h"
 #include <d3dcompiler.h>
 #include <cstdio>
+#include <cmath>
 #include <vector>
 
 #include "imgui.h"
@@ -77,8 +78,17 @@ cbuffer CameraConstants : register(b0)
 {
     float4x4 viewProjection;
     float3 cameraPos;
-    float padding;
+    float numConeLights;
 };
+
+struct ConeLight
+{
+    float4 positionAndRange;
+    float4 directionAndCosOuter;
+    float4 colorAndCosInner;
+};
+
+StructuredBuffer<ConeLight> coneLights : register(t0);
 
 struct VSInput
 {
@@ -105,34 +115,59 @@ PSInput VSMain(VSInput input)
     return output;
 }
 
+float3 CalculateConeLightContribution(float3 worldPos, float3 normal, ConeLight light)
+{
+    float3 lightPos = light.positionAndRange.xyz;
+    float range = light.positionAndRange.w;
+    float3 lightDir = light.directionAndCosOuter.xyz;
+    float cosOuter = light.directionAndCosOuter.w;
+    float3 lightColor = light.colorAndCosInner.xyz;
+    float cosInner = light.colorAndCosInner.w;
+
+    float3 toLight = lightPos - worldPos;
+    float dist = length(toLight);
+    if (dist > range) return float3(0, 0, 0);
+
+    float3 toLightNorm = toLight / dist;
+    float cosAngle = dot(-toLightNorm, lightDir);
+    if (cosAngle < cosOuter) return float3(0, 0, 0);
+
+    float coneAtten = saturate((cosAngle - cosOuter) / (cosInner - cosOuter));
+    float distAtten = saturate(1.0 - dist / range);
+    distAtten *= distAtten;
+    float ndotl = saturate(dot(normal, toLightNorm));
+
+    return lightColor * ndotl * coneAtten * distAtten;
+}
+
 float4 PSMain(PSInput input) : SV_TARGET
 {
     float3 color;
-
-    // Check if this is the ground (normal pointing up and y near 0)
     bool isGround = (input.normal.y > 0.9 && abs(input.worldPos.y) < 0.1);
 
     if (isGround)
     {
-        // Grid pattern for ground
         float2 grid = frac(input.uv * 100.0);
         float lineWidth = 0.02;
         float gridLine = (grid.x < lineWidth || grid.y < lineWidth) ? 1.0 : 0.0;
-
         float3 baseColor = float3(0.3, 0.35, 0.3);
         float3 lineColor = float3(0.15, 0.2, 0.15);
         color = lerp(baseColor, lineColor, gridLine);
     }
     else
     {
-        // Box: simple shading based on normal
         float3 lightDir = normalize(float3(0.5, 1.0, 0.3));
         float ndotl = saturate(dot(input.normal, lightDir));
-        float3 boxColor = float3(0.8, 0.3, 0.2); // Reddish-orange box
+        float3 boxColor = float3(0.8, 0.3, 0.2);
         color = boxColor * (0.3 + 0.7 * ndotl);
     }
 
-    // Simple distance fog
+    int lightCount = (int)numConeLights;
+    for (int i = 0; i < lightCount; i++)
+    {
+        color += CalculateConeLightContribution(input.worldPos, input.normal, coneLights[i]);
+    }
+
     float dist = length(input.worldPos - cameraPos);
     float fog = saturate(dist / 2000.0);
     float3 fogColor = float3(0.5, 0.6, 0.7);
@@ -144,15 +179,23 @@ float4 PSMain(PSInput input) : SV_TARGET
 
 static bool CreatePipelineState(D3D12Renderer* renderer)
 {
-    // Create root signature
-    D3D12_ROOT_PARAMETER rootParams[1] = {};
+    // Create root signature with CBV for camera constants and SRV for cone lights
+    D3D12_ROOT_PARAMETER rootParams[2] = {};
+
+    // Camera constants CBV at b0
     rootParams[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
     rootParams[0].Descriptor.ShaderRegister = 0;
     rootParams[0].Descriptor.RegisterSpace = 0;
     rootParams[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
+    // Cone lights SRV at t0
+    rootParams[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
+    rootParams[1].Descriptor.ShaderRegister = 0;
+    rootParams[1].Descriptor.RegisterSpace = 0;
+    rootParams[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
     D3D12_ROOT_SIGNATURE_DESC rootSigDesc = {};
-    rootSigDesc.NumParameters = 1;
+    rootSigDesc.NumParameters = 2;
     rootSigDesc.pParameters = rootParams;
     rootSigDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
 
@@ -428,6 +471,23 @@ static bool CreateConstantBuffers(D3D12Renderer* renderer)
         renderer->constantBuffer[i]->Map(0, nullptr, (void**)&renderer->constantBufferMapped[i]);
     }
 
+    // Create cone lights buffer
+    const UINT lightsBufferSize = MAX_CONE_LIGHTS * sizeof(ConeLightGPU);
+    bufferDesc.Width = lightsBufferSize;
+
+    for (UINT i = 0; i < FRAME_COUNT; ++i)
+    {
+        if (FAILED(renderer->device->CreateCommittedResource(
+            &heapProps, D3D12_HEAP_FLAG_NONE, &bufferDesc,
+            D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
+            IID_PPV_ARGS(&renderer->coneLightsBuffer[i]))))
+        {
+            return false;
+        }
+
+        renderer->coneLightsBuffer[i]->Map(0, nullptr, (void**)&renderer->coneLightsMapped[i]);
+    }
+
     return true;
 }
 
@@ -660,6 +720,8 @@ void D3D12_Shutdown(D3D12Renderer* renderer)
     {
         if (renderer->constantBuffer[i])
             renderer->constantBuffer[i]->Unmap(0, nullptr);
+        if (renderer->coneLightsBuffer[i])
+            renderer->coneLightsBuffer[i]->Unmap(0, nullptr);
     }
 
     if (renderer->fenceEvent)
@@ -689,6 +751,26 @@ void D3D12_Render(D3D12Renderer* renderer)
     CameraConstants* cb = renderer->constantBufferMapped[renderer->frameIndex];
     cb->viewProjection = renderer->camera.getViewProjectionMatrix(aspect);
     cb->cameraPos = renderer->camera.position;
+    cb->numConeLights = (float)renderer->numConeLights;
+
+    // Update cone lights buffer
+    ConeLightGPU* lightsGPU = renderer->coneLightsMapped[renderer->frameIndex];
+    for (uint32_t i = 0; i < renderer->numConeLights; ++i)
+    {
+        const ConeLight& light = renderer->coneLights[i];
+        lightsGPU[i].position[0] = light.position.x;
+        lightsGPU[i].position[1] = light.position.y;
+        lightsGPU[i].position[2] = light.position.z;
+        lightsGPU[i].position[3] = light.range;
+        lightsGPU[i].direction[0] = light.direction.x;
+        lightsGPU[i].direction[1] = light.direction.y;
+        lightsGPU[i].direction[2] = light.direction.z;
+        lightsGPU[i].direction[3] = cosf(light.outerAngle);
+        lightsGPU[i].color[0] = light.color.x;
+        lightsGPU[i].color[1] = light.color.y;
+        lightsGPU[i].color[2] = light.color.z;
+        lightsGPU[i].color[3] = cosf(light.innerAngle);
+    }
 
     // Reset command allocator and command list
     renderer->commandAllocators[renderer->frameIndex]->Reset();
@@ -697,6 +779,7 @@ void D3D12_Render(D3D12Renderer* renderer)
     // Set root signature
     renderer->commandList->SetGraphicsRootSignature(renderer->rootSignature.Get());
     renderer->commandList->SetGraphicsRootConstantBufferView(0, renderer->constantBuffer[renderer->frameIndex]->GetGPUVirtualAddress());
+    renderer->commandList->SetGraphicsRootShaderResourceView(1, renderer->coneLightsBuffer[renderer->frameIndex]->GetGPUVirtualAddress());
 
     // Transition render target
     D3D12_RESOURCE_BARRIER barrier = {};

@@ -13,6 +13,24 @@
 using Microsoft::WRL::ComPtr;
 
 static constexpr uint32_t FRAME_COUNT = 2;
+static constexpr uint32_t MAX_CONE_LIGHTS = 128;
+
+struct ConeLight
+{
+    Vec3 position;
+    Vec3 direction;
+    Vec3 color;
+    float range;
+    float innerAngle;
+    float outerAngle;
+};
+
+struct ConeLightGPU
+{
+    float position[4];
+    float direction[4];
+    float color[4];
+};
 
 struct Vertex
 {
@@ -25,7 +43,7 @@ struct CameraConstants
 {
     Mat4 viewProjection;
     Vec3 cameraPos;
-    float padding;
+    float numConeLights;
 };
 
 struct D3D12Renderer
@@ -54,6 +72,12 @@ struct D3D12Renderer
     // Constant buffer
     ComPtr<ID3D12Resource>          constantBuffer[FRAME_COUNT];
     CameraConstants*                constantBufferMapped[FRAME_COUNT];
+
+    // Cone lights buffer
+    ComPtr<ID3D12Resource>          coneLightsBuffer[FRAME_COUNT];
+    ConeLightGPU*                   coneLightsMapped[FRAME_COUNT];
+    ConeLight                       coneLights[MAX_CONE_LIGHTS];
+    uint32_t                        numConeLights = 0;
 
     // Depth buffer
     ComPtr<ID3D12Resource>          depthBuffer;
