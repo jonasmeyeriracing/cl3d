@@ -137,6 +137,11 @@ struct D3D12Renderer
     ComPtr<ID3D12Resource>          shadowDepthBuffer;
     ComPtr<ID3D12PipelineState>     shadowPipelineState;
     bool showShadowMapDebug = false;
+
+    // Fullscreen quad for depth visualization
+    ComPtr<ID3D12RootSignature>     fullscreenRootSignature;
+    ComPtr<ID3D12PipelineState>     fullscreenPipelineState;
+    ComPtr<ID3D12DescriptorHeap>    shadowSrvHeap;
 };
 
 bool D3D12_Init(D3D12Renderer* renderer, HWND hwnd, uint32_t width, uint32_t height);

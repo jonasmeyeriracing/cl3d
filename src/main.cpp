@@ -160,6 +160,9 @@ static void DrawImGui(float deltaTime)
     ImGui::Checkbox("Show Headlight Debug", &g_Renderer.showDebugLights);
     ImGui::Text("Cone Lights: %u", g_Renderer.numConeLights);
 
+    ImGui::Separator();
+    ImGui::Checkbox("Show Top-Down Depth", &g_Renderer.showShadowMapDebug);
+
     ImGui::End();
 }
 

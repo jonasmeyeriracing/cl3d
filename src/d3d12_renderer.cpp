@@ -258,6 +258,35 @@ float4 PSMain(PSInput input) : SV_TARGET
 }
 )";
 
+static const char* g_FullscreenShaderSource = R"(
+Texture2D<float> depthTexture : register(t0);
+SamplerState depthSampler : register(s0);
+
+struct VSOutput
+{
+    float4 position : SV_POSITION;
+    float2 uv : TEXCOORD;
+};
+
+VSOutput VSMain(uint vertexID : SV_VertexID)
+{
+    VSOutput output;
+    // Generate fullscreen triangle
+    output.uv = float2((vertexID << 1) & 2, vertexID & 2);
+    output.position = float4(output.uv * 2.0 - 1.0, 0.0, 1.0);
+    output.uv.y = 1.0 - output.uv.y;  // Flip Y for texture sampling
+    return output;
+}
+
+float4 PSMain(VSOutput input) : SV_TARGET
+{
+    float depth = depthTexture.Sample(depthSampler, input.uv);
+    // Remap depth for better visualization (near=white, far=black)
+    float visualDepth = 1.0 - depth;
+    return float4(visualDepth, visualDepth, visualDepth, 1.0);
+}
+)";
+
 static bool CreatePipelineState(D3D12Renderer* renderer)
 {
     // Create root signature with CBV for camera constants and SRV for cone lights
@@ -421,6 +450,126 @@ static bool CreatePipelineState(D3D12Renderer* renderer)
         OutputDebugStringA("Failed to create shadow PSO\n");
         return false;
     }
+
+    return true;
+}
+
+static bool CreateFullscreenPipeline(D3D12Renderer* renderer)
+{
+    // Create root signature for fullscreen pass (SRV descriptor table + sampler)
+    D3D12_DESCRIPTOR_RANGE srvRange = {};
+    srvRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+    srvRange.NumDescriptors = 1;
+    srvRange.BaseShaderRegister = 0;
+    srvRange.RegisterSpace = 0;
+    srvRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+
+    D3D12_ROOT_PARAMETER rootParam = {};
+    rootParam.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    rootParam.DescriptorTable.NumDescriptorRanges = 1;
+    rootParam.DescriptorTable.pDescriptorRanges = &srvRange;
+    rootParam.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
+    D3D12_STATIC_SAMPLER_DESC sampler = {};
+    sampler.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+    sampler.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    sampler.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    sampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    sampler.ShaderRegister = 0;
+    sampler.RegisterSpace = 0;
+    sampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
+    D3D12_ROOT_SIGNATURE_DESC rootSigDesc = {};
+    rootSigDesc.NumParameters = 1;
+    rootSigDesc.pParameters = &rootParam;
+    rootSigDesc.NumStaticSamplers = 1;
+    rootSigDesc.pStaticSamplers = &sampler;
+    rootSigDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
+
+    ComPtr<ID3DBlob> signature;
+    ComPtr<ID3DBlob> error;
+    if (FAILED(D3D12SerializeRootSignature(&rootSigDesc, D3D_ROOT_SIGNATURE_VERSION_1, &signature, &error)))
+    {
+        if (error) OutputDebugStringA((char*)error->GetBufferPointer());
+        return false;
+    }
+
+    if (FAILED(renderer->device->CreateRootSignature(0, signature->GetBufferPointer(),
+        signature->GetBufferSize(), IID_PPV_ARGS(&renderer->fullscreenRootSignature))))
+    {
+        return false;
+    }
+
+    // Compile fullscreen shaders
+    UINT compileFlags = 0;
+#ifdef _DEBUG
+    compileFlags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
+#endif
+
+    ComPtr<ID3DBlob> vertexShader;
+    ComPtr<ID3DBlob> pixelShader;
+
+    if (FAILED(D3DCompile(g_FullscreenShaderSource, strlen(g_FullscreenShaderSource), "fullscreen.hlsl", nullptr, nullptr,
+        "VSMain", "vs_5_0", compileFlags, 0, &vertexShader, &error)))
+    {
+        if (error) OutputDebugStringA((char*)error->GetBufferPointer());
+        return false;
+    }
+
+    if (FAILED(D3DCompile(g_FullscreenShaderSource, strlen(g_FullscreenShaderSource), "fullscreen.hlsl", nullptr, nullptr,
+        "PSMain", "ps_5_0", compileFlags, 0, &pixelShader, &error)))
+    {
+        if (error) OutputDebugStringA((char*)error->GetBufferPointer());
+        return false;
+    }
+
+    // Create PSO (no input layout - using SV_VertexID)
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
+    psoDesc.pRootSignature = renderer->fullscreenRootSignature.Get();
+    psoDesc.VS = { vertexShader->GetBufferPointer(), vertexShader->GetBufferSize() };
+    psoDesc.PS = { pixelShader->GetBufferPointer(), pixelShader->GetBufferSize() };
+    psoDesc.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
+    psoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+    psoDesc.RasterizerState.DepthClipEnable = FALSE;
+    psoDesc.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+    psoDesc.DepthStencilState.DepthEnable = FALSE;
+    psoDesc.SampleMask = UINT_MAX;
+    psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    psoDesc.NumRenderTargets = 1;
+    psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+    psoDesc.SampleDesc.Count = 1;
+
+    if (FAILED(renderer->device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&renderer->fullscreenPipelineState))))
+    {
+        OutputDebugStringA("Failed to create fullscreen PSO\n");
+        return false;
+    }
+
+    // Create SRV descriptor heap for shadow map
+    D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc = {};
+    srvHeapDesc.NumDescriptors = 1;
+    srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+    srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+
+    if (FAILED(renderer->device->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&renderer->shadowSrvHeap))))
+    {
+        OutputDebugStringA("Failed to create shadow SRV heap\n");
+        return false;
+    }
+
+    // Create SRV for shadow depth buffer
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+    srvDesc.Format = DXGI_FORMAT_R32_FLOAT;  // Read depth as R32
+    srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srvDesc.Texture2D.MipLevels = 1;
+    srvDesc.Texture2D.MostDetailedMip = 0;
+
+    renderer->device->CreateShaderResourceView(
+        renderer->shadowDepthBuffer.Get(),
+        &srvDesc,
+        renderer->shadowSrvHeap->GetCPUDescriptorHandleForHeapStart()
+    );
 
     return true;
 }
@@ -978,6 +1127,13 @@ bool D3D12_Init(D3D12Renderer* renderer, HWND hwnd, uint32_t width, uint32_t hei
         return false;
     }
 
+    // Create fullscreen pipeline for depth visualization (after shadow buffer)
+    if (!CreateFullscreenPipeline(renderer))
+    {
+        OutputDebugStringA("Failed to create fullscreen pipeline\n");
+        return false;
+    }
+
     // Create pipeline
     if (!CreatePipelineState(renderer))
     {
@@ -1190,19 +1346,49 @@ void D3D12_Render(D3D12Renderer* renderer)
     D3D12_RECT scissorRect = { 0, 0, (LONG)renderer->width, (LONG)renderer->height };
     renderer->commandList->RSSetScissorRects(1, &scissorRect);
 
-    // Draw scene
-    renderer->commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    renderer->commandList->IASetVertexBuffers(0, 1, &renderer->vertexBufferView);
-    renderer->commandList->IASetIndexBuffer(&renderer->indexBufferView);
-    renderer->commandList->DrawIndexedInstanced(renderer->indexCount, 1, 0, 0, 0);
-
-    // Draw debug cone wireframes if enabled
-    if (renderer->showDebugLights && renderer->debugVertexCount > 0)
+    if (renderer->showShadowMapDebug)
     {
-        renderer->commandList->SetPipelineState(renderer->debugPipelineState.Get());
-        renderer->commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_LINELIST);
-        renderer->commandList->IASetVertexBuffers(0, 1, &renderer->debugVertexBufferView);
-        renderer->commandList->DrawInstanced(renderer->debugVertexCount, 1, 0, 0);
+        // Transition shadow depth buffer to shader resource state
+        D3D12_RESOURCE_BARRIER shadowBarrier = {};
+        shadowBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        shadowBarrier.Transition.pResource = renderer->shadowDepthBuffer.Get();
+        shadowBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_DEPTH_WRITE;
+        shadowBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+        shadowBarrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+        renderer->commandList->ResourceBarrier(1, &shadowBarrier);
+
+        // Draw fullscreen quad with depth visualization
+        renderer->commandList->SetPipelineState(renderer->fullscreenPipelineState.Get());
+        renderer->commandList->SetGraphicsRootSignature(renderer->fullscreenRootSignature.Get());
+
+        ID3D12DescriptorHeap* heaps[] = { renderer->shadowSrvHeap.Get() };
+        renderer->commandList->SetDescriptorHeaps(1, heaps);
+        renderer->commandList->SetGraphicsRootDescriptorTable(0, renderer->shadowSrvHeap->GetGPUDescriptorHandleForHeapStart());
+
+        renderer->commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        renderer->commandList->DrawInstanced(3, 1, 0, 0);
+
+        // Transition shadow depth buffer back to depth write state
+        shadowBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+        shadowBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_DEPTH_WRITE;
+        renderer->commandList->ResourceBarrier(1, &shadowBarrier);
+    }
+    else
+    {
+        // Draw scene
+        renderer->commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        renderer->commandList->IASetVertexBuffers(0, 1, &renderer->vertexBufferView);
+        renderer->commandList->IASetIndexBuffer(&renderer->indexBufferView);
+        renderer->commandList->DrawIndexedInstanced(renderer->indexCount, 1, 0, 0, 0);
+
+        // Draw debug cone wireframes if enabled
+        if (renderer->showDebugLights && renderer->debugVertexCount > 0)
+        {
+            renderer->commandList->SetPipelineState(renderer->debugPipelineState.Get());
+            renderer->commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_LINELIST);
+            renderer->commandList->IASetVertexBuffers(0, 1, &renderer->debugVertexBufferView);
+            renderer->commandList->DrawInstanced(renderer->debugVertexCount, 1, 0, 0);
+        }
     }
 
     // Render ImGui
