@@ -50,6 +50,9 @@ struct CameraConstants
     Mat4 viewProjection;
     Vec3 cameraPos;
     float numConeLights;
+    float ambientIntensity;
+    float coneLightIntensity;
+    float padding[2];
 };
 
 struct D3D12Renderer
@@ -114,6 +117,10 @@ struct D3D12Renderer
     ComPtr<ID3D12Resource>          debugVertexBuffer;
     D3D12_VERTEX_BUFFER_VIEW        debugVertexBufferView;
     uint32_t                        debugVertexCount = 0;
+
+    // Lighting controls
+    float ambientIntensity = 0.3f;
+    float coneLightIntensity = 1.0f;
 };
 
 bool D3D12_Init(D3D12Renderer* renderer, HWND hwnd, uint32_t width, uint32_t height);

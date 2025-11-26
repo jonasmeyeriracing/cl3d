@@ -79,6 +79,9 @@ cbuffer CameraConstants : register(b0)
     float4x4 viewProjection;
     float3 cameraPos;
     float numConeLights;
+    float ambientIntensity;
+    float coneLightIntensity;
+    float2 padding;
 };
 
 struct ConeLight
@@ -152,20 +155,20 @@ float4 PSMain(PSInput input) : SV_TARGET
         float gridLine = (grid.x < lineWidth || grid.y < lineWidth) ? 1.0 : 0.0;
         float3 baseColor = float3(0.3, 0.35, 0.3);
         float3 lineColor = float3(0.15, 0.2, 0.15);
-        color = lerp(baseColor, lineColor, gridLine);
+        color = lerp(baseColor, lineColor, gridLine) * ambientIntensity;
     }
     else
     {
         float3 lightDir = normalize(float3(0.5, 1.0, 0.3));
         float ndotl = saturate(dot(input.normal, lightDir));
         float3 boxColor = float3(0.8, 0.3, 0.2);
-        color = boxColor * (0.3 + 0.7 * ndotl);
+        color = boxColor * (ambientIntensity + (1.0 - ambientIntensity) * ndotl);
     }
 
     int lightCount = (int)numConeLights;
     for (int i = 0; i < lightCount; i++)
     {
-        color += CalculateConeLightContribution(input.worldPos, input.normal, coneLights[i]);
+        color += CalculateConeLightContribution(input.worldPos, input.normal, coneLights[i]) * coneLightIntensity;
     }
 
     float dist = length(input.worldPos - cameraPos);
@@ -964,6 +967,8 @@ void D3D12_Render(D3D12Renderer* renderer)
     cb->viewProjection = renderer->camera.getViewProjectionMatrix(aspect);
     cb->cameraPos = renderer->camera.position;
     cb->numConeLights = (float)renderer->numConeLights;
+    cb->ambientIntensity = renderer->ambientIntensity;
+    cb->coneLightIntensity = renderer->coneLightIntensity;
 
     // Update cone lights buffer
     ConeLightGPU* lightsGPU = renderer->coneLightsMapped[renderer->frameIndex];
