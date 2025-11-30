@@ -84,9 +84,13 @@ struct D3D12Renderer
     D3D12_INDEX_BUFFER_VIEW         indexBufferView;
     uint32_t                        indexCount;
 
-    // Constant buffer
+    // Constant buffer (main camera)
     ComPtr<ID3D12Resource>          constantBuffer[FRAME_COUNT];
     CameraConstants*                constantBufferMapped[FRAME_COUNT];
+
+    // Constant buffer (shadow/top-down camera)
+    ComPtr<ID3D12Resource>          shadowConstantBuffer[FRAME_COUNT];
+    CameraConstants*                shadowConstantBufferMapped[FRAME_COUNT];
 
     // Cone lights buffer
     ComPtr<ID3D12Resource>          coneLightsBuffer[FRAME_COUNT];

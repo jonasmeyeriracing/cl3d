@@ -281,8 +281,12 @@ VSOutput VSMain(uint vertexID : SV_VertexID)
 float4 PSMain(VSOutput input) : SV_TARGET
 {
     float depth = depthTexture.Sample(depthSampler, input.uv);
-    // Remap depth for better visualization (near=white, far=black)
-    float visualDepth = 1.0 - depth;
+    // Remap depth for better visualization
+    // Depth 1.0 = far (cleared value), depth < 1.0 = geometry
+    // Scale and invert for visibility: near objects = white, far = darker
+    float visualDepth = saturate(1.0 - depth);
+    // Boost contrast for better visibility
+    visualDepth = pow(visualDepth, 0.3);
     return float4(visualDepth, visualDepth, visualDepth, 1.0);
 }
 )";
@@ -739,19 +743,17 @@ static bool CreateGeometry(D3D12Renderer* renderer)
     }
 
     // Calculate top-down orthographic view-projection matrix from AABB
-    // Looking down from above (-Y direction), with Z as "up" in the view
-    float aabbHeight = renderer->carAABB.max.y - renderer->carAABB.min.y;
+    // Looking down from above (-Y direction)
 
     // Add some padding
     float padding = 5.0f;
-    float left = renderer->carAABB.min.x - padding;
-    float right = renderer->carAABB.max.x + padding;
-    float bottom = renderer->carAABB.min.z - padding;
-    float top = renderer->carAABB.max.z + padding;
 
-    // Near/far for looking down (Y axis range + padding)
-    float nearZ = 0.1f;
-    float farZ = aabbHeight + 100.0f;
+    // For top-down view, X maps to screen X, Z maps to screen Y
+    float halfWidth = (renderer->carAABB.max.x - renderer->carAABB.min.x) * 0.5f + padding;
+    float halfDepth = (renderer->carAABB.max.z - renderer->carAABB.min.z) * 0.5f + padding;
+
+    // Use the larger dimension for both axes to maintain 1:1 world space aspect ratio
+    float halfSize = (halfWidth > halfDepth) ? halfWidth : halfDepth;
 
     // Create top-down view matrix (looking down from above)
     float viewHeight = renderer->carAABB.max.y + 50.0f;
@@ -764,7 +766,14 @@ static bool CreateGeometry(D3D12Renderer* renderer)
     Vec3 upDir(0, 0, -1);  // Z- is "up" when looking down
 
     Mat4 topDownView = Mat4::lookAt(eyePos, targetPos, upDir);
-    Mat4 topDownProj = Mat4::orthographic(left, right, bottom, top, nearZ, farZ);
+
+    // Orthographic projection bounds are in view space after lookAt transform
+    // View X = world X, View Y = world -Z, View Z = world -Y (depth)
+    // Use same size for both axes for 1:1 aspect ratio
+    float nearZ = 0.1f;
+    float farZ = viewHeight + 10.0f;  // Far enough to capture ground
+
+    Mat4 topDownProj = Mat4::orthographic(-halfSize, halfSize, -halfSize, halfSize, nearZ, farZ);
     renderer->topDownViewProj = topDownProj * topDownView;
 
     renderer->indexCount = (uint32_t)indices.size();
@@ -930,6 +939,7 @@ static bool CreateConstantBuffers(D3D12Renderer* renderer)
 
     for (UINT i = 0; i < FRAME_COUNT; ++i)
     {
+        // Main camera constant buffer
         if (FAILED(renderer->device->CreateCommittedResource(
             &heapProps, D3D12_HEAP_FLAG_NONE, &bufferDesc,
             D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
@@ -937,8 +947,17 @@ static bool CreateConstantBuffers(D3D12Renderer* renderer)
         {
             return false;
         }
-
         renderer->constantBuffer[i]->Map(0, nullptr, (void**)&renderer->constantBufferMapped[i]);
+
+        // Shadow/top-down camera constant buffer
+        if (FAILED(renderer->device->CreateCommittedResource(
+            &heapProps, D3D12_HEAP_FLAG_NONE, &bufferDesc,
+            D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
+            IID_PPV_ARGS(&renderer->shadowConstantBuffer[i]))))
+        {
+            return false;
+        }
+        renderer->shadowConstantBuffer[i]->Map(0, nullptr, (void**)&renderer->shadowConstantBufferMapped[i]);
     }
 
     // Create cone lights buffer
@@ -1211,6 +1230,8 @@ void D3D12_Shutdown(D3D12Renderer* renderer)
     {
         if (renderer->constantBuffer[i])
             renderer->constantBuffer[i]->Unmap(0, nullptr);
+        if (renderer->shadowConstantBuffer[i])
+            renderer->shadowConstantBuffer[i]->Unmap(0, nullptr);
         if (renderer->coneLightsBuffer[i])
             renderer->coneLightsBuffer[i]->Unmap(0, nullptr);
     }
@@ -1237,14 +1258,23 @@ void D3D12_WaitForGpu(D3D12Renderer* renderer)
 
 void D3D12_Render(D3D12Renderer* renderer)
 {
-    // Update constant buffer
     float aspect = (float)renderer->width / (float)renderer->height;
+
+    // Update main camera constant buffer
     CameraConstants* cb = renderer->constantBufferMapped[renderer->frameIndex];
     cb->viewProjection = renderer->camera.getViewProjectionMatrix(aspect);
     cb->cameraPos = renderer->camera.position;
     cb->numConeLights = (float)renderer->numConeLights;
     cb->ambientIntensity = renderer->ambientIntensity;
     cb->coneLightIntensity = renderer->coneLightIntensity;
+
+    // Update shadow constant buffer with top-down view
+    CameraConstants* shadowCb = renderer->shadowConstantBufferMapped[renderer->frameIndex];
+    shadowCb->viewProjection = renderer->topDownViewProj;
+    shadowCb->cameraPos = renderer->camera.position;
+    shadowCb->numConeLights = (float)renderer->numConeLights;
+    shadowCb->ambientIntensity = renderer->ambientIntensity;
+    shadowCb->coneLightIntensity = renderer->coneLightIntensity;
 
     // Update cone lights buffer
     ConeLightGPU* lightsGPU = renderer->coneLightsMapped[renderer->frameIndex];
@@ -1273,10 +1303,8 @@ void D3D12_Render(D3D12Renderer* renderer)
     renderer->commandList->SetGraphicsRootSignature(renderer->rootSignature.Get());
 
     // ========== Shadow Pass (top-down depth-only) ==========
-    // Temporarily update constant buffer with top-down view-projection
-    cb->viewProjection = renderer->topDownViewProj;
-
-    renderer->commandList->SetGraphicsRootConstantBufferView(0, renderer->constantBuffer[renderer->frameIndex]->GetGPUVirtualAddress());
+    // Use shadow constant buffer with top-down view-projection
+    renderer->commandList->SetGraphicsRootConstantBufferView(0, renderer->shadowConstantBuffer[renderer->frameIndex]->GetGPUVirtualAddress());
     renderer->commandList->SetGraphicsRootShaderResourceView(1, renderer->coneLightsBuffer[renderer->frameIndex]->GetGPUVirtualAddress());
 
     // Get shadow DSV handle (second slot in DSV heap)
@@ -1307,10 +1335,8 @@ void D3D12_Render(D3D12Renderer* renderer)
     renderer->commandList->DrawIndexedInstanced(renderer->indexCount, 1, 0, 0, 0);
 
     // ========== Main Render Pass ==========
-    // Restore main camera view-projection
-    cb->viewProjection = renderer->camera.getViewProjectionMatrix(aspect);
-
     renderer->commandList->SetPipelineState(renderer->pipelineState.Get());
+    // Use main constant buffer with main camera view-projection
     renderer->commandList->SetGraphicsRootConstantBufferView(0, renderer->constantBuffer[renderer->frameIndex]->GetGPUVirtualAddress());
 
     // Transition render target
