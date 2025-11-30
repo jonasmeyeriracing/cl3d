@@ -218,6 +218,9 @@ cbuffer CameraConstants : register(b0)
     float coneLightIntensity;
     float shadowBias;
     float falloffExponent;
+    float debugLightOverlap;
+    float overlapMaxCount;
+    float2 cbPadding;
 };
 
 struct ConeLight
@@ -331,8 +334,59 @@ float3 CalculateConeLightContribution(float3 worldPos, float3 normal, ConeLight 
     return lightColor * ndotl * coneAtten * distAtten * shadow;
 }
 
+// Convert light count to heat map color (green -> yellow -> red)
+float3 LightCountToColor(int count)
+{
+    // 0 = green, 60 = yellow, 120 = red
+    float t = saturate(count / 120.0);
+
+    if (t < 0.5)
+    {
+        // Green to Yellow (0-60 lights)
+        float s = t * 2.0;  // 0 to 1
+        return float3(s, 1.0, 0.0);
+    }
+    else
+    {
+        // Yellow to Red (60-120 lights)
+        float s = (t - 0.5) * 2.0;  // 0 to 1
+        return float3(1.0, 1.0 - s, 0.0);
+    }
+}
+
 float4 PSMain(PSInput input) : SV_TARGET
 {
+    // Debug mode: show light overlap heat map
+    if (debugLightOverlap > 0.5)
+    {
+        int lightCount = (int)numConeLights;
+        float overlapCount = 0.0;
+
+        for (int i = 0; i < lightCount; i++)
+        {
+            float3 contribution = CalculateConeLightContribution(input.worldPos, input.normal, coneLights[i], i);
+            // Count as 1.0 if any light contribution
+            float total = dot(contribution, float3(1, 1, 1));
+            overlapCount += step(0.000001, total);
+        }
+
+        // Convert count to heat map: green (0) -> yellow (half) -> red (max)
+        float t = saturate(overlapCount / overlapMaxCount);
+        float3 heatColor;
+        if (t < 0.5)
+        {
+            float s = t * 2.0;
+            heatColor = float3(s, 1.0, 0.0);
+        }
+        else
+        {
+            float s = (t - 0.5) * 2.0;
+            heatColor = float3(1.0, 1.0 - s, 0.0);
+        }
+        return float4(heatColor, 1.0);
+    }
+
+    // Normal rendering
     float3 color;
     bool isGround = (input.normal.y > 0.9 && abs(input.worldPos.y) < 0.1);
 
@@ -1756,18 +1810,35 @@ void D3D12_Update(D3D12Renderer* renderer, float deltaTime)
     // Track parameters
     float straightLength = renderer->trackStraightLength;
     float radius = renderer->trackRadius;
+    float trackLength = renderer->trackLength;
+
+    // Calculate spacing parameters
+    // At spacing=1: cars evenly spread (maxSpacing)
+    // At spacing=0: cars close together (minGap = 0.5m between cars)
+    const float minGap = 0.5f;
+    const int carsPerLane = (int)renderer->numCars / 2;
+    float maxSpacingMeters = trackLength / (float)carsPerLane;  // Max distance between cars in each lane
+    float minSpacingMeters = carLength + minGap;  // Minimum: car length + 0.5m gap
+    float currentSpacingMeters = minSpacingMeters + (maxSpacingMeters - minSpacingMeters) * renderer->carSpacing;
+    float spacingFraction = currentSpacingMeters / trackLength;  // As fraction of track
 
     // Move all cars forward
-    float progressDelta = (renderer->carSpeed * deltaTime) / renderer->trackLength;
+    float progressDelta = (renderer->carSpeed * deltaTime) / trackLength;
 
     for (uint32_t i = 0; i < renderer->numCars; i++)
     {
-        // Update progress
+        // Update base progress (car 0 in each lane)
         renderer->carTrackProgress[i] += progressDelta;
         if (renderer->carTrackProgress[i] >= 1.0f)
             renderer->carTrackProgress[i] -= 1.0f;
 
-        float progress = renderer->carTrackProgress[i];
+        // Calculate actual position with spacing applied
+        int lane = i % 2;
+        int posInLane = i / 2;
+        float baseProgress = renderer->carTrackProgress[lane];  // Use lane leader's progress
+        float progress = baseProgress + posInLane * spacingFraction;
+        if (progress >= 1.0f) progress -= 1.0f;
+
         float laneOffset = renderer->carLane[i];
 
         // Get position and direction on track
@@ -1827,6 +1898,8 @@ void D3D12_Render(D3D12Renderer* renderer)
     cb->coneLightIntensity = renderer->coneLightIntensity;
     cb->shadowBias = renderer->shadowBias;
     cb->falloffExponent = renderer->headlightFalloff;
+    cb->debugLightOverlap = renderer->showLightOverlap ? 1.0f : 0.0f;
+    cb->overlapMaxCount = renderer->overlapMaxCount;
 
     // Update shadow constant buffer with top-down view
     CameraConstants* shadowCb = renderer->shadowConstantBufferMapped[renderer->frameIndex];
@@ -1837,6 +1910,7 @@ void D3D12_Render(D3D12Renderer* renderer)
     shadowCb->coneLightIntensity = renderer->coneLightIntensity;
     shadowCb->shadowBias = renderer->shadowBias;
     shadowCb->falloffExponent = renderer->headlightFalloff;
+    shadowCb->debugLightOverlap = 0.0f;  // Never in debug mode for shadow pass
 
     // Update cone lights buffer (use slider-controlled range)
     float currentRange = renderer->headlightRange;

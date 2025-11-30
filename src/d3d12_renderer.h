@@ -55,6 +55,9 @@ struct CameraConstants
     float coneLightIntensity;
     float shadowBias;
     float falloffExponent;
+    float debugLightOverlap;  // 1.0 = show light overlap visualization
+    float overlapMaxCount;    // Max count for heat map coloring
+    float padding[2];         // Align to 16 bytes
 };
 
 struct AABB
@@ -131,6 +134,8 @@ struct D3D12Renderer
 
     // Debug visualization
     bool showDebugLights = false;
+    bool showLightOverlap = false;  // Heat map of light cone overlaps
+    float overlapMaxCount = 10.0f;  // Max count for heat map (maps to red)
     ComPtr<ID3D12PipelineState>     debugPipelineState;
     ComPtr<ID3D12Resource>          debugVertexBuffer;
     D3D12_VERTEX_BUFFER_VIEW        debugVertexBufferView;
@@ -148,6 +153,7 @@ struct D3D12Renderer
     float carTrackProgress[MAX_CARS];  // 0-1 progress along the oval track
     float carLane[MAX_CARS];           // Lane offset (inner/outer)
     float carSpeed = 20.0f;            // Speed in meters per second
+    float carSpacing = 1.0f;           // 0-1: 0=close (0.5m gap), 1=max spread
 
     // Track parameters
     float trackLength = 0.0f;          // Total track length in meters

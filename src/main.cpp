@@ -162,9 +162,15 @@ static void DrawImGui(float deltaTime)
     ImGui::Separator();
     ImGui::Text("Animation");
     ImGui::SliderFloat("Car Speed (m/s)", &g_Renderer.carSpeed, 0.0f, 100.0f);
+    ImGui::SliderFloat("Car Spacing", &g_Renderer.carSpacing, 0.0f, 1.0f);
 
     ImGui::Separator();
     ImGui::Checkbox("Show Headlight Debug", &g_Renderer.showDebugLights);
+    ImGui::Checkbox("Show Light Overlap", &g_Renderer.showLightOverlap);
+    if (g_Renderer.showLightOverlap)
+    {
+        ImGui::SliderFloat("Overlap Max", &g_Renderer.overlapMaxCount, 1.0f, 120.0f);
+    }
     ImGui::Text("Cone Lights: %u", g_Renderer.numConeLights);
     if (g_Renderer.activeLightCount == 0)
         g_Renderer.activeLightCount = (int)g_Renderer.numConeLights;
