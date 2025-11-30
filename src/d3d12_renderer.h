@@ -57,7 +57,8 @@ struct CameraConstants
     float falloffExponent;
     float debugLightOverlap;  // 1.0 = show light overlap visualization
     float overlapMaxCount;    // Max count for heat map coloring
-    float padding[2];         // Align to 16 bytes
+    float disableShadows;     // 1.0 = skip shadow map sampling
+    float padding[1];         // Align to 16 bytes
 };
 
 struct AABB
@@ -147,6 +148,7 @@ struct D3D12Renderer
     float shadowBias = 0.0f;
     float headlightRange = 30.0f;  // Range in meters (20-300)
     float headlightFalloff = 2.0f; // Distance falloff exponent (lower = less falloff)
+    bool disableShadows = false;   // Skip shadow map sampling
 
     // Car animation
     uint32_t numCars = 0;

@@ -220,7 +220,8 @@ cbuffer CameraConstants : register(b0)
     float falloffExponent;
     float debugLightOverlap;
     float overlapMaxCount;
-    float2 cbPadding;
+    float disableShadows;
+    float cbPadding;
 };
 
 struct ConeLight
@@ -315,21 +316,23 @@ float3 CalculateConeLightContribution(float3 worldPos, float3 normal, ConeLight 
     distAtten = pow(distAtten, falloffExponent);
     float ndotl = saturate(dot(normal, toLightNorm));
 
-    // Compute shadow inline
-    float4x4 lightVP = lightMatrices[lightIndex];
-    float4 lightSpacePos = mul(lightVP, float4(worldPos, 1.0));
-    float3 projCoords = lightSpacePos.xyz / lightSpacePos.w;
+    // Compute shadow (skip if disabled)
+    float shadow = 1.0;
+    if (disableShadows < 0.5)
+    {
+        float4x4 lightVP = lightMatrices[lightIndex];
+        float4 lightSpacePos = mul(lightVP, float4(worldPos, 1.0));
+        float3 projCoords = lightSpacePos.xyz / lightSpacePos.w;
 
-    float2 shadowUV = projCoords.xy * 0.5 + 0.5;
-    shadowUV.y = 1.0 - shadowUV.y;
+        float2 shadowUV = projCoords.xy * 0.5 + 0.5;
+        shadowUV.y = 1.0 - shadowUV.y;
 
-    int3 texCoord = int3(shadowUV * 256.0, lightIndex);
-    float shadowDepth = coneShadowMaps.Load(int4(texCoord, 0));
+        int3 texCoord = int3(shadowUV * 256.0, lightIndex);
+        float shadowDepth = coneShadowMaps.Load(int4(texCoord, 0));
 
-    // Shadow comparison: lit if fragment depth <= shadow depth + bias
-    // shadowDepth is what was rendered, projCoords.z is what we're shading
-    // They should be equal for visible surfaces, so bias handles precision
-    float shadow = (projCoords.z <= shadowDepth + shadowBias) ? 1.0 : 0.0;
+        // Shadow comparison: lit if fragment depth <= shadow depth + bias
+        shadow = (projCoords.z <= shadowDepth + shadowBias) ? 1.0 : 0.0;
+    }
 
     return lightColor * ndotl * coneAtten * distAtten * shadow;
 }
@@ -1900,6 +1903,7 @@ void D3D12_Render(D3D12Renderer* renderer)
     cb->falloffExponent = renderer->headlightFalloff;
     cb->debugLightOverlap = renderer->showLightOverlap ? 1.0f : 0.0f;
     cb->overlapMaxCount = renderer->overlapMaxCount;
+    cb->disableShadows = renderer->disableShadows ? 1.0f : 0.0f;
 
     // Update shadow constant buffer with top-down view
     CameraConstants* shadowCb = renderer->shadowConstantBufferMapped[renderer->frameIndex];
