@@ -294,6 +294,39 @@ float CalculateShadow(float3 worldPos, int lightIndex)
     return (projCoords.z - bias) <= shadowDepth ? 1.0 : 0.0;
 }
 
+// Convert HSV to RGB (h, s, v all in [0, 1])
+float3 HSVtoRGB(float h, float s, float v)
+{
+    float3 rgb;
+    float c = v * s;
+    float hPrime = h * 6.0;
+    float x = c * (1.0 - abs(fmod(hPrime, 2.0) - 1.0));
+    float m = v - c;
+
+    if (hPrime < 1.0)
+        rgb = float3(c, x, 0.0);
+    else if (hPrime < 2.0)
+        rgb = float3(x, c, 0.0);
+    else if (hPrime < 3.0)
+        rgb = float3(0.0, c, x);
+    else if (hPrime < 4.0)
+        rgb = float3(0.0, x, c);
+    else if (hPrime < 5.0)
+        rgb = float3(x, 0.0, c);
+    else
+        rgb = float3(c, 0.0, x);
+
+    return rgb + float3(m, m, m);
+}
+
+// Map intensity [0, 1] to heat color using hue [0, 0.9]
+// 0 = red (hue 0), 1 = magenta (hue 0.9)
+float3 IntensityToHeatColor(float intensity)
+{
+    float hue = saturate(intensity) * 0.9;
+    return HSVtoRGB(hue, 1.0, 1.0);
+}
+
 float3 CalculateConeLightContribution(float3 worldPos, float3 normal, ConeLight light, int lightIndex)
 {
     float3 lightPos = light.positionAndRange.xyz;
@@ -373,19 +406,9 @@ float4 PSMain(PSInput input) : SV_TARGET
             overlapCount += step(0.000001, total);
         }
 
-        // Convert count to heat map: green (0) -> yellow (half) -> red (max)
+        // Convert count to heat color using hue gradient (0=red, max=magenta)
         float t = saturate(overlapCount / overlapMaxCount);
-        float3 heatColor;
-        if (t < 0.5)
-        {
-            float s = t * 2.0;
-            heatColor = float3(s, 1.0, 0.0);
-        }
-        else
-        {
-            float s = (t - 0.5) * 2.0;
-            heatColor = float3(1.0, 1.0 - s, 0.0);
-        }
+        float3 heatColor = IntensityToHeatColor(t);
         return float4(heatColor, 1.0);
     }
 
