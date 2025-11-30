@@ -52,7 +52,8 @@ struct CameraConstants
     float numConeLights;
     float ambientIntensity;
     float coneLightIntensity;
-    float padding[2];
+    float shadowBias;
+    float padding;
 };
 
 struct AABB
@@ -97,6 +98,7 @@ struct D3D12Renderer
     ConeLightGPU*                   coneLightsMapped[FRAME_COUNT];
     ConeLight                       coneLights[MAX_CONE_LIGHTS];
     uint32_t                        numConeLights = 0;
+    int                             activeLightCount = 0;  // For debug slider
 
     // Depth buffer
     ComPtr<ID3D12Resource>          depthBuffer;
@@ -131,6 +133,7 @@ struct D3D12Renderer
     // Lighting controls
     float ambientIntensity = 0.3f;
     float coneLightIntensity = 1.0f;
+    float shadowBias = 0.0f;
 
     // Car AABB for top-down rendering
     AABB carAABB;
@@ -141,11 +144,23 @@ struct D3D12Renderer
     ComPtr<ID3D12Resource>          shadowDepthBuffer;
     ComPtr<ID3D12PipelineState>     shadowPipelineState;
     bool showShadowMapDebug = false;
+    int debugShadowMapIndex = 0;  // Which cone shadow map slice to visualize
 
     // Fullscreen quad for depth visualization
     ComPtr<ID3D12RootSignature>     fullscreenRootSignature;
     ComPtr<ID3D12PipelineState>     fullscreenPipelineState;
     ComPtr<ID3D12DescriptorHeap>    shadowSrvHeap;
+
+    // Cone light shadow maps (256x256 x MAX_CONE_LIGHTS)
+    static constexpr uint32_t CONE_SHADOW_MAP_SIZE = 256;
+    ComPtr<ID3D12Resource>          coneShadowMaps;            // Texture2DArray
+    ComPtr<ID3D12DescriptorHeap>    coneShadowDsvHeap;         // DSV heap for all slices
+    ComPtr<ID3D12DescriptorHeap>    coneShadowSrvHeap;         // SRV heap for shader access
+    Mat4                            coneLightViewProj[MAX_CONE_LIGHTS];  // CPU-side matrices
+
+    // Per-light view-projection matrices (uploaded to GPU)
+    ComPtr<ID3D12Resource>          coneLightMatricesBuffer[FRAME_COUNT];
+    Mat4*                           coneLightMatricesMapped[FRAME_COUNT];
 };
 
 bool D3D12_Init(D3D12Renderer* renderer, HWND hwnd, uint32_t width, uint32_t height);

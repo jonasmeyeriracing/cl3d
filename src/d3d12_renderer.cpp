@@ -117,6 +117,97 @@ static bool CreateShadowDepthBuffer(D3D12Renderer* renderer)
     return true;
 }
 
+static bool CreateConeShadowMaps(D3D12Renderer* renderer)
+{
+    // Create Texture2DArray for all cone light shadow maps
+    D3D12_HEAP_PROPERTIES heapProps = {};
+    heapProps.Type = D3D12_HEAP_TYPE_DEFAULT;
+
+    D3D12_RESOURCE_DESC texDesc = {};
+    texDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    texDesc.Width = D3D12Renderer::CONE_SHADOW_MAP_SIZE;
+    texDesc.Height = D3D12Renderer::CONE_SHADOW_MAP_SIZE;
+    texDesc.DepthOrArraySize = MAX_CONE_LIGHTS;
+    texDesc.MipLevels = 1;
+    texDesc.Format = DXGI_FORMAT_R32_TYPELESS;  // Typeless for DSV/SRV flexibility
+    texDesc.SampleDesc.Count = 1;
+    texDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+
+    D3D12_CLEAR_VALUE clearValue = {};
+    clearValue.Format = DXGI_FORMAT_D32_FLOAT;
+    clearValue.DepthStencil.Depth = 1.0f;
+
+    if (FAILED(renderer->device->CreateCommittedResource(
+        &heapProps,
+        D3D12_HEAP_FLAG_NONE,
+        &texDesc,
+        D3D12_RESOURCE_STATE_DEPTH_WRITE,
+        &clearValue,
+        IID_PPV_ARGS(&renderer->coneShadowMaps))))
+    {
+        OutputDebugStringA("Failed to create cone shadow maps texture array\n");
+        return false;
+    }
+
+    // Create DSV descriptor heap (one DSV per array slice)
+    D3D12_DESCRIPTOR_HEAP_DESC dsvHeapDesc = {};
+    dsvHeapDesc.NumDescriptors = MAX_CONE_LIGHTS;
+    dsvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
+
+    if (FAILED(renderer->device->CreateDescriptorHeap(&dsvHeapDesc, IID_PPV_ARGS(&renderer->coneShadowDsvHeap))))
+    {
+        OutputDebugStringA("Failed to create cone shadow DSV heap\n");
+        return false;
+    }
+
+    // Create DSV for each array slice
+    UINT dsvDescriptorSize = renderer->device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
+    D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = renderer->coneShadowDsvHeap->GetCPUDescriptorHandleForHeapStart();
+
+    for (UINT i = 0; i < MAX_CONE_LIGHTS; ++i)
+    {
+        D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc = {};
+        dsvDesc.Format = DXGI_FORMAT_D32_FLOAT;
+        dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2DARRAY;
+        dsvDesc.Texture2DArray.FirstArraySlice = i;
+        dsvDesc.Texture2DArray.ArraySize = 1;
+        dsvDesc.Texture2DArray.MipSlice = 0;
+
+        renderer->device->CreateDepthStencilView(renderer->coneShadowMaps.Get(), &dsvDesc, dsvHandle);
+        dsvHandle.ptr += dsvDescriptorSize;
+    }
+
+    // Create SRV descriptor heap (shader visible, for sampling in main pass)
+    D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc = {};
+    srvHeapDesc.NumDescriptors = 1;
+    srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+    srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+
+    if (FAILED(renderer->device->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&renderer->coneShadowSrvHeap))))
+    {
+        OutputDebugStringA("Failed to create cone shadow SRV heap\n");
+        return false;
+    }
+
+    // Create SRV for the entire texture array
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+    srvDesc.Format = DXGI_FORMAT_R32_FLOAT;
+    srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
+    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srvDesc.Texture2DArray.MostDetailedMip = 0;
+    srvDesc.Texture2DArray.MipLevels = 1;
+    srvDesc.Texture2DArray.FirstArraySlice = 0;
+    srvDesc.Texture2DArray.ArraySize = MAX_CONE_LIGHTS;
+
+    renderer->device->CreateShaderResourceView(
+        renderer->coneShadowMaps.Get(),
+        &srvDesc,
+        renderer->coneShadowSrvHeap->GetCPUDescriptorHandleForHeapStart()
+    );
+
+    return true;
+}
+
 static const char* g_ShaderSource = R"(
 cbuffer CameraConstants : register(b0)
 {
@@ -125,7 +216,8 @@ cbuffer CameraConstants : register(b0)
     float numConeLights;
     float ambientIntensity;
     float coneLightIntensity;
-    float2 padding;
+    float shadowBias;
+    float padding;
 };
 
 struct ConeLight
@@ -136,6 +228,9 @@ struct ConeLight
 };
 
 StructuredBuffer<ConeLight> coneLights : register(t0);
+StructuredBuffer<float4x4> lightMatrices : register(t1);
+Texture2DArray<float> coneShadowMaps : register(t2);
+SamplerComparisonState shadowSampler : register(s0);
 
 struct VSInput
 {
@@ -162,7 +257,40 @@ PSInput VSMain(VSInput input)
     return output;
 }
 
-float3 CalculateConeLightContribution(float3 worldPos, float3 normal, ConeLight light)
+float CalculateShadow(float3 worldPos, int lightIndex)
+{
+    float4x4 lightVP = lightMatrices[lightIndex];
+    float4 lightSpacePos = mul(lightVP, float4(worldPos, 1.0));
+
+    // Perspective divide
+    float3 projCoords = lightSpacePos.xyz / lightSpacePos.w;
+
+    // Check if outside light frustum
+    if (projCoords.z < 0.0 || projCoords.z > 1.0)
+        return 1.0;
+
+    // Convert XY from NDC [-1,1] to UV [0,1]
+    float2 shadowUV = projCoords.xy * 0.5 + 0.5;
+    shadowUV.y = 1.0 - shadowUV.y;
+
+    // Check bounds
+    if (shadowUV.x < 0.0 || shadowUV.x > 1.0 || shadowUV.y < 0.0 || shadowUV.y > 1.0)
+        return 1.0;
+
+    // Sample shadow map
+    int3 texCoord = int3(shadowUV * 256.0, lightIndex);
+    float shadowDepth = coneShadowMaps.Load(int4(texCoord, 0));
+
+    // DEBUG: Show colors based on comparison
+    // projCoords.z is our depth, shadowDepth is stored depth
+    // If projCoords.z > shadowDepth, we're behind something (shadowed)
+    float bias = 0.005;
+
+    // Return 1.0 if lit (our depth <= shadow depth), 0.0 if shadowed
+    return (projCoords.z - bias) <= shadowDepth ? 1.0 : 0.0;
+}
+
+float3 CalculateConeLightContribution(float3 worldPos, float3 normal, ConeLight light, int lightIndex)
 {
     float3 lightPos = light.positionAndRange.xyz;
     float range = light.positionAndRange.w;
@@ -184,7 +312,23 @@ float3 CalculateConeLightContribution(float3 worldPos, float3 normal, ConeLight 
     distAtten *= distAtten;
     float ndotl = saturate(dot(normal, toLightNorm));
 
-    return lightColor * ndotl * coneAtten * distAtten;
+    // Compute shadow inline
+    float4x4 lightVP = lightMatrices[lightIndex];
+    float4 lightSpacePos = mul(lightVP, float4(worldPos, 1.0));
+    float3 projCoords = lightSpacePos.xyz / lightSpacePos.w;
+
+    float2 shadowUV = projCoords.xy * 0.5 + 0.5;
+    shadowUV.y = 1.0 - shadowUV.y;
+
+    int3 texCoord = int3(shadowUV * 256.0, lightIndex);
+    float shadowDepth = coneShadowMaps.Load(int4(texCoord, 0));
+
+    // Shadow comparison: lit if fragment depth <= shadow depth + bias
+    // shadowDepth is what was rendered, projCoords.z is what we're shading
+    // They should be equal for visible surfaces, so bias handles precision
+    float shadow = (projCoords.z <= shadowDepth + shadowBias) ? 1.0 : 0.0;
+
+    return lightColor * ndotl * coneAtten * distAtten * shadow;
 }
 
 float4 PSMain(PSInput input) : SV_TARGET
@@ -197,22 +341,22 @@ float4 PSMain(PSInput input) : SV_TARGET
         float2 grid = frac(input.uv * 100.0);
         float lineWidth = 0.02;
         float gridLine = (grid.x < lineWidth || grid.y < lineWidth) ? 1.0 : 0.0;
-        float3 baseColor = float3(0.3, 0.35, 0.3);
-        float3 lineColor = float3(0.15, 0.2, 0.15);
+        float3 baseColor = float3(0.3, 0.3, 0.3);
+        float3 lineColor = float3(0.2, 0.2, 0.2);
         color = lerp(baseColor, lineColor, gridLine) * ambientIntensity;
     }
     else
     {
         float3 lightDir = normalize(float3(0.5, 1.0, 0.3));
         float ndotl = saturate(dot(input.normal, lightDir));
-        float3 boxColor = float3(0.8, 0.3, 0.2);
+        float3 boxColor = float3(0.85, 0.85, 0.85);
         color = boxColor * (ambientIntensity + (1.0 - ambientIntensity) * ndotl);
     }
 
     int lightCount = (int)numConeLights;
     for (int i = 0; i < lightCount; i++)
     {
-        color += CalculateConeLightContribution(input.worldPos, input.normal, coneLights[i]) * coneLightIntensity;
+        color += CalculateConeLightContribution(input.worldPos, input.normal, coneLights[i], i) * coneLightIntensity;
     }
 
     float dist = length(input.worldPos - cameraPos);
@@ -258,9 +402,42 @@ float4 PSMain(PSInput input) : SV_TARGET
 }
 )";
 
+// Shadow pass vertex shader - uses root constants at b1 for view-projection
+static const char* g_ShadowShaderSource = R"(
+cbuffer ShadowViewProj : register(b1)
+{
+    float4x4 shadowViewProjection;
+};
+
+struct VSInput
+{
+    float3 position : POSITION;
+    float3 normal : NORMAL;
+    float2 uv : TEXCOORD;
+};
+
+struct PSInput
+{
+    float4 position : SV_POSITION;
+};
+
+PSInput VSMain(VSInput input)
+{
+    PSInput output;
+    output.position = mul(shadowViewProjection, float4(input.position, 1.0));
+    return output;
+}
+)";
+
 static const char* g_FullscreenShaderSource = R"(
-Texture2D<float> depthTexture : register(t0);
+Texture2DArray<float> depthTexture : register(t0);
 SamplerState depthSampler : register(s0);
+
+cbuffer SliceIndex : register(b0)
+{
+    int sliceIndex;
+    int3 padding;
+};
 
 struct VSOutput
 {
@@ -280,7 +457,7 @@ VSOutput VSMain(uint vertexID : SV_VertexID)
 
 float4 PSMain(VSOutput input) : SV_TARGET
 {
-    float depth = depthTexture.Sample(depthSampler, input.uv);
+    float depth = depthTexture.Sample(depthSampler, float3(input.uv, sliceIndex));
     // Remap depth for better visualization
     // Depth 1.0 = far (cleared value), depth < 1.0 = geometry
     // Scale and invert for visibility: near objects = white, far = darker
@@ -293,8 +470,13 @@ float4 PSMain(VSOutput input) : SV_TARGET
 
 static bool CreatePipelineState(D3D12Renderer* renderer)
 {
-    // Create root signature with CBV for camera constants and SRV for cone lights
-    D3D12_ROOT_PARAMETER rootParams[2] = {};
+    // Create root signature with:
+    // - CBV for camera constants (b0)
+    // - SRV for cone lights (t0)
+    // - SRV for light matrices (t1)
+    // - Descriptor table for cone shadow maps (t2)
+    // - Root constants for shadow pass view-projection (b1) - 16 floats
+    D3D12_ROOT_PARAMETER rootParams[5] = {};
 
     // Camera constants CBV at b0
     rootParams[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
@@ -308,9 +490,49 @@ static bool CreatePipelineState(D3D12Renderer* renderer)
     rootParams[1].Descriptor.RegisterSpace = 0;
     rootParams[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 
+    // Light matrices SRV at t1
+    rootParams[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
+    rootParams[2].Descriptor.ShaderRegister = 1;
+    rootParams[2].Descriptor.RegisterSpace = 0;
+    rootParams[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
+    // Cone shadow maps descriptor table at t2
+    D3D12_DESCRIPTOR_RANGE shadowMapRange = {};
+    shadowMapRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+    shadowMapRange.NumDescriptors = 1;
+    shadowMapRange.BaseShaderRegister = 2;
+    shadowMapRange.RegisterSpace = 0;
+    shadowMapRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+
+    rootParams[3].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    rootParams[3].DescriptorTable.NumDescriptorRanges = 1;
+    rootParams[3].DescriptorTable.pDescriptorRanges = &shadowMapRange;
+    rootParams[3].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
+    // Root constants for shadow pass view-projection matrix at b1 (16 floats)
+    rootParams[4].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+    rootParams[4].Constants.ShaderRegister = 1;
+    rootParams[4].Constants.RegisterSpace = 0;
+    rootParams[4].Constants.Num32BitValues = 16;
+    rootParams[4].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
+
+    // Static sampler for shadow comparison
+    D3D12_STATIC_SAMPLER_DESC shadowSampler = {};
+    shadowSampler.Filter = D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT;
+    shadowSampler.AddressU = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
+    shadowSampler.AddressV = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
+    shadowSampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
+    shadowSampler.ComparisonFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+    shadowSampler.BorderColor = D3D12_STATIC_BORDER_COLOR_OPAQUE_WHITE;
+    shadowSampler.ShaderRegister = 0;
+    shadowSampler.RegisterSpace = 0;
+    shadowSampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
     D3D12_ROOT_SIGNATURE_DESC rootSigDesc = {};
-    rootSigDesc.NumParameters = 2;
+    rootSigDesc.NumParameters = 5;
     rootSigDesc.pParameters = rootParams;
+    rootSigDesc.NumStaticSamplers = 1;
+    rootSigDesc.pStaticSamplers = &shadowSampler;
     rootSigDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
 
     ComPtr<ID3DBlob> signature;
@@ -430,11 +652,20 @@ static bool CreatePipelineState(D3D12Renderer* renderer)
         return false;
     }
 
+    // Compile shadow shader (uses root constants at b1)
+    ComPtr<ID3DBlob> shadowVS;
+    if (FAILED(D3DCompile(g_ShadowShaderSource, strlen(g_ShadowShaderSource), "shadow.hlsl", nullptr, nullptr,
+        "VSMain", "vs_5_0", compileFlags, 0, &shadowVS, &error)))
+    {
+        if (error) OutputDebugStringA((char*)error->GetBufferPointer());
+        return false;
+    }
+
     // Create shadow map PSO (depth-only, no pixel shader)
     D3D12_GRAPHICS_PIPELINE_STATE_DESC shadowPsoDesc = {};
     shadowPsoDesc.InputLayout = { inputLayout, _countof(inputLayout) };
     shadowPsoDesc.pRootSignature = renderer->rootSignature.Get();
-    shadowPsoDesc.VS = { vertexShader->GetBufferPointer(), vertexShader->GetBufferSize() };
+    shadowPsoDesc.VS = { shadowVS->GetBufferPointer(), shadowVS->GetBufferSize() };
     // No pixel shader - depth only
     shadowPsoDesc.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
     shadowPsoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_BACK;
@@ -460,7 +691,7 @@ static bool CreatePipelineState(D3D12Renderer* renderer)
 
 static bool CreateFullscreenPipeline(D3D12Renderer* renderer)
 {
-    // Create root signature for fullscreen pass (SRV descriptor table + sampler)
+    // Create root signature for fullscreen pass (root constant + SRV descriptor table + sampler)
     D3D12_DESCRIPTOR_RANGE srvRange = {};
     srvRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
     srvRange.NumDescriptors = 1;
@@ -468,11 +699,20 @@ static bool CreateFullscreenPipeline(D3D12Renderer* renderer)
     srvRange.RegisterSpace = 0;
     srvRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
 
-    D3D12_ROOT_PARAMETER rootParam = {};
-    rootParam.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-    rootParam.DescriptorTable.NumDescriptorRanges = 1;
-    rootParam.DescriptorTable.pDescriptorRanges = &srvRange;
-    rootParam.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+    D3D12_ROOT_PARAMETER rootParams[2] = {};
+
+    // Root constant for slice index at b0
+    rootParams[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+    rootParams[0].Constants.ShaderRegister = 0;
+    rootParams[0].Constants.RegisterSpace = 0;
+    rootParams[0].Constants.Num32BitValues = 4;  // sliceIndex + padding
+    rootParams[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
+    // SRV descriptor table for texture
+    rootParams[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    rootParams[1].DescriptorTable.NumDescriptorRanges = 1;
+    rootParams[1].DescriptorTable.pDescriptorRanges = &srvRange;
+    rootParams[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 
     D3D12_STATIC_SAMPLER_DESC sampler = {};
     sampler.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
@@ -484,8 +724,8 @@ static bool CreateFullscreenPipeline(D3D12Renderer* renderer)
     sampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 
     D3D12_ROOT_SIGNATURE_DESC rootSigDesc = {};
-    rootSigDesc.NumParameters = 1;
-    rootSigDesc.pParameters = &rootParam;
+    rootSigDesc.NumParameters = 2;
+    rootSigDesc.pParameters = rootParams;
     rootSigDesc.NumStaticSamplers = 1;
     rootSigDesc.pStaticSamplers = &sampler;
     rootSigDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
@@ -977,6 +1217,23 @@ static bool CreateConstantBuffers(D3D12Renderer* renderer)
         renderer->coneLightsBuffer[i]->Map(0, nullptr, (void**)&renderer->coneLightsMapped[i]);
     }
 
+    // Create per-light view-projection matrix buffer
+    const UINT matricesBufferSize = MAX_CONE_LIGHTS * sizeof(Mat4);
+    bufferDesc.Width = matricesBufferSize;
+
+    for (UINT i = 0; i < FRAME_COUNT; ++i)
+    {
+        if (FAILED(renderer->device->CreateCommittedResource(
+            &heapProps, D3D12_HEAP_FLAG_NONE, &bufferDesc,
+            D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
+            IID_PPV_ARGS(&renderer->coneLightMatricesBuffer[i]))))
+        {
+            return false;
+        }
+
+        renderer->coneLightMatricesBuffer[i]->Map(0, nullptr, (void**)&renderer->coneLightMatricesMapped[i]);
+    }
+
     return true;
 }
 
@@ -1146,6 +1403,13 @@ bool D3D12_Init(D3D12Renderer* renderer, HWND hwnd, uint32_t width, uint32_t hei
         return false;
     }
 
+    // Create cone light shadow maps (256x256 x 128)
+    if (!CreateConeShadowMaps(renderer))
+    {
+        OutputDebugStringA("Failed to create cone shadow maps\n");
+        return false;
+    }
+
     // Create fullscreen pipeline for depth visualization (after shadow buffer)
     if (!CreateFullscreenPipeline(renderer))
     {
@@ -1234,6 +1498,8 @@ void D3D12_Shutdown(D3D12Renderer* renderer)
             renderer->shadowConstantBuffer[i]->Unmap(0, nullptr);
         if (renderer->coneLightsBuffer[i])
             renderer->coneLightsBuffer[i]->Unmap(0, nullptr);
+        if (renderer->coneLightMatricesBuffer[i])
+            renderer->coneLightMatricesBuffer[i]->Unmap(0, nullptr);
     }
 
     if (renderer->fenceEvent)
@@ -1260,21 +1526,27 @@ void D3D12_Render(D3D12Renderer* renderer)
 {
     float aspect = (float)renderer->width / (float)renderer->height;
 
+    // Use activeLightCount for rendering (debug slider)
+    uint32_t lightCount = (uint32_t)renderer->activeLightCount;
+    if (lightCount > renderer->numConeLights) lightCount = renderer->numConeLights;
+
     // Update main camera constant buffer
     CameraConstants* cb = renderer->constantBufferMapped[renderer->frameIndex];
     cb->viewProjection = renderer->camera.getViewProjectionMatrix(aspect);
     cb->cameraPos = renderer->camera.position;
-    cb->numConeLights = (float)renderer->numConeLights;
+    cb->numConeLights = (float)lightCount;
     cb->ambientIntensity = renderer->ambientIntensity;
     cb->coneLightIntensity = renderer->coneLightIntensity;
+    cb->shadowBias = renderer->shadowBias;
 
     // Update shadow constant buffer with top-down view
     CameraConstants* shadowCb = renderer->shadowConstantBufferMapped[renderer->frameIndex];
     shadowCb->viewProjection = renderer->topDownViewProj;
     shadowCb->cameraPos = renderer->camera.position;
-    shadowCb->numConeLights = (float)renderer->numConeLights;
+    shadowCb->numConeLights = (float)lightCount;
     shadowCb->ambientIntensity = renderer->ambientIntensity;
     shadowCb->coneLightIntensity = renderer->coneLightIntensity;
+    shadowCb->shadowBias = renderer->shadowBias;
 
     // Update cone lights buffer
     ConeLightGPU* lightsGPU = renderer->coneLightsMapped[renderer->frameIndex];
@@ -1295,6 +1567,25 @@ void D3D12_Render(D3D12Renderer* renderer)
         lightsGPU[i].color[3] = cosf(light.innerAngle);
     }
 
+    // Calculate and update per-light view-projection matrices
+    Mat4* lightMatrices = renderer->coneLightMatricesMapped[renderer->frameIndex];
+    for (uint32_t i = 0; i < renderer->numConeLights; ++i)
+    {
+        const ConeLight& light = renderer->coneLights[i];
+
+        // View matrix: look from light position along light direction
+        Vec3 target = light.position + light.direction * light.range;
+        Vec3 up = (fabsf(light.direction.y) < 0.99f) ? Vec3(0, 1, 0) : Vec3(1, 0, 0);
+        Mat4 view = Mat4::lookAt(light.position, target, up);
+
+        // Perspective projection using outer cone angle
+        float fov = light.outerAngle * 2.0f;  // Full cone angle
+        Mat4 proj = Mat4::perspective(fov, 1.0f, 0.1f, light.range);
+
+        renderer->coneLightViewProj[i] = proj * view;
+        lightMatrices[i] = renderer->coneLightViewProj[i];
+    }
+
     // Reset command allocator and command list
     renderer->commandAllocators[renderer->frameIndex]->Reset();
     renderer->commandList->Reset(renderer->commandAllocators[renderer->frameIndex].Get(), renderer->shadowPipelineState.Get());
@@ -1303,9 +1594,8 @@ void D3D12_Render(D3D12Renderer* renderer)
     renderer->commandList->SetGraphicsRootSignature(renderer->rootSignature.Get());
 
     // ========== Shadow Pass (top-down depth-only) ==========
-    // Use shadow constant buffer with top-down view-projection
-    renderer->commandList->SetGraphicsRootConstantBufferView(0, renderer->shadowConstantBuffer[renderer->frameIndex]->GetGPUVirtualAddress());
-    renderer->commandList->SetGraphicsRootShaderResourceView(1, renderer->coneLightsBuffer[renderer->frameIndex]->GetGPUVirtualAddress());
+    // Set top-down view-projection as root constants
+    renderer->commandList->SetGraphicsRoot32BitConstants(4, 16, renderer->topDownViewProj.m, 0);
 
     // Get shadow DSV handle (second slot in DSV heap)
     UINT dsvDescriptorSize = renderer->device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
@@ -1334,10 +1624,66 @@ void D3D12_Render(D3D12Renderer* renderer)
     renderer->commandList->IASetIndexBuffer(&renderer->indexBufferView);
     renderer->commandList->DrawIndexedInstanced(renderer->indexCount, 1, 0, 0, 0);
 
+    // ========== Cone Light Shadow Maps Pass ==========
+    // Render shadow map for each active cone light
+    UINT coneDsvDescriptorSize = renderer->device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
+
+    D3D12_VIEWPORT coneShadowViewport = {};
+    coneShadowViewport.Width = (float)D3D12Renderer::CONE_SHADOW_MAP_SIZE;
+    coneShadowViewport.Height = (float)D3D12Renderer::CONE_SHADOW_MAP_SIZE;
+    coneShadowViewport.MaxDepth = 1.0f;
+
+    D3D12_RECT coneShadowScissor = { 0, 0, (LONG)D3D12Renderer::CONE_SHADOW_MAP_SIZE, (LONG)D3D12Renderer::CONE_SHADOW_MAP_SIZE };
+
+    for (uint32_t i = 0; i < lightCount; ++i)
+    {
+        // Get DSV for this array slice
+        D3D12_CPU_DESCRIPTOR_HANDLE coneDsvHandle = renderer->coneShadowDsvHeap->GetCPUDescriptorHandleForHeapStart();
+        coneDsvHandle.ptr += i * coneDsvDescriptorSize;
+
+        // Clear this slice
+        renderer->commandList->ClearDepthStencilView(coneDsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+
+        // Set render target (depth only)
+        renderer->commandList->OMSetRenderTargets(0, nullptr, FALSE, &coneDsvHandle);
+
+        // Set viewport and scissor
+        renderer->commandList->RSSetViewports(1, &coneShadowViewport);
+        renderer->commandList->RSSetScissorRects(1, &coneShadowScissor);
+
+        // Set view-projection matrix as root constants (16 floats at root parameter 4)
+        renderer->commandList->SetGraphicsRoot32BitConstants(4, 16, renderer->coneLightViewProj[i].m, 0);
+
+        // Draw scene (skip ground plane - first 6 indices - only render cars as shadow casters)
+        renderer->commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        renderer->commandList->IASetVertexBuffers(0, 1, &renderer->vertexBufferView);
+        renderer->commandList->IASetIndexBuffer(&renderer->indexBufferView);
+        // Skip first 6 indices (ground plane), render only cars
+        uint32_t carIndexCount = renderer->indexCount - 6;
+        renderer->commandList->DrawIndexedInstanced(carIndexCount, 1, 6, 0, 0);
+    }
+
     // ========== Main Render Pass ==========
+    // Transition cone shadow maps from depth write to shader resource
+    D3D12_RESOURCE_BARRIER coneShadowBarrier = {};
+    coneShadowBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    coneShadowBarrier.Transition.pResource = renderer->coneShadowMaps.Get();
+    coneShadowBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_DEPTH_WRITE;
+    coneShadowBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+    coneShadowBarrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    renderer->commandList->ResourceBarrier(1, &coneShadowBarrier);
+
     renderer->commandList->SetPipelineState(renderer->pipelineState.Get());
+
+    // Set descriptor heap for shadow map SRV
+    ID3D12DescriptorHeap* shadowHeaps[] = { renderer->coneShadowSrvHeap.Get() };
+    renderer->commandList->SetDescriptorHeaps(1, shadowHeaps);
+
     // Use main constant buffer with main camera view-projection
     renderer->commandList->SetGraphicsRootConstantBufferView(0, renderer->constantBuffer[renderer->frameIndex]->GetGPUVirtualAddress());
+    renderer->commandList->SetGraphicsRootShaderResourceView(1, renderer->coneLightsBuffer[renderer->frameIndex]->GetGPUVirtualAddress());
+    renderer->commandList->SetGraphicsRootShaderResourceView(2, renderer->coneLightMatricesBuffer[renderer->frameIndex]->GetGPUVirtualAddress());
+    renderer->commandList->SetGraphicsRootDescriptorTable(3, renderer->coneShadowSrvHeap->GetGPUDescriptorHandleForHeapStart());
 
     // Transition render target
     D3D12_RESOURCE_BARRIER barrier = {};
@@ -1374,30 +1720,22 @@ void D3D12_Render(D3D12Renderer* renderer)
 
     if (renderer->showShadowMapDebug)
     {
-        // Transition shadow depth buffer to shader resource state
-        D3D12_RESOURCE_BARRIER shadowBarrier = {};
-        shadowBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-        shadowBarrier.Transition.pResource = renderer->shadowDepthBuffer.Get();
-        shadowBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_DEPTH_WRITE;
-        shadowBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
-        shadowBarrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-        renderer->commandList->ResourceBarrier(1, &shadowBarrier);
-
+        // Cone shadow maps are already transitioned to shader resource state above
         // Draw fullscreen quad with depth visualization
         renderer->commandList->SetPipelineState(renderer->fullscreenPipelineState.Get());
         renderer->commandList->SetGraphicsRootSignature(renderer->fullscreenRootSignature.Get());
 
-        ID3D12DescriptorHeap* heaps[] = { renderer->shadowSrvHeap.Get() };
+        // Set slice index as root constant
+        int sliceData[4] = { renderer->debugShadowMapIndex, 0, 0, 0 };
+        renderer->commandList->SetGraphicsRoot32BitConstants(0, 4, sliceData, 0);
+
+        // Use cone shadow maps (Texture2DArray)
+        ID3D12DescriptorHeap* heaps[] = { renderer->coneShadowSrvHeap.Get() };
         renderer->commandList->SetDescriptorHeaps(1, heaps);
-        renderer->commandList->SetGraphicsRootDescriptorTable(0, renderer->shadowSrvHeap->GetGPUDescriptorHandleForHeapStart());
+        renderer->commandList->SetGraphicsRootDescriptorTable(1, renderer->coneShadowSrvHeap->GetGPUDescriptorHandleForHeapStart());
 
         renderer->commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         renderer->commandList->DrawInstanced(3, 1, 0, 0);
-
-        // Transition shadow depth buffer back to depth write state
-        shadowBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
-        shadowBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_DEPTH_WRITE;
-        renderer->commandList->ResourceBarrier(1, &shadowBarrier);
     }
     else
     {
@@ -1421,6 +1759,11 @@ void D3D12_Render(D3D12Renderer* renderer)
     ID3D12DescriptorHeap* descriptorHeaps[] = { renderer->imguiSrvHeap.Get() };
     renderer->commandList->SetDescriptorHeaps(1, descriptorHeaps);
     ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), renderer->commandList.Get());
+
+    // Transition cone shadow maps back to depth write for next frame
+    coneShadowBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+    coneShadowBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_DEPTH_WRITE;
+    renderer->commandList->ResourceBarrier(1, &coneShadowBarrier);
 
     // Transition to present
     barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;

@@ -155,13 +155,21 @@ static void DrawImGui(float deltaTime)
     ImGui::Text("Lighting");
     ImGui::SliderFloat("Ambient", &g_Renderer.ambientIntensity, 0.0f, 1.0f);
     ImGui::SliderFloat("Headlight Intensity", &g_Renderer.coneLightIntensity, 0.0f, 3.0f);
+    ImGui::SliderFloat("Shadow Bias", &g_Renderer.shadowBias, -0.5f, 0.5f);
 
     ImGui::Separator();
     ImGui::Checkbox("Show Headlight Debug", &g_Renderer.showDebugLights);
     ImGui::Text("Cone Lights: %u", g_Renderer.numConeLights);
+    if (g_Renderer.activeLightCount == 0)
+        g_Renderer.activeLightCount = (int)g_Renderer.numConeLights;
+    ImGui::SliderInt("Active Lights", &g_Renderer.activeLightCount, 0, (int)g_Renderer.numConeLights);
 
     ImGui::Separator();
-    ImGui::Checkbox("Show Top-Down Depth", &g_Renderer.showShadowMapDebug);
+    ImGui::Checkbox("Show Cone Shadow Map", &g_Renderer.showShadowMapDebug);
+    if (g_Renderer.showShadowMapDebug)
+    {
+        ImGui::SliderInt("Shadow Map Index", &g_Renderer.debugShadowMapIndex, 0, (int)g_Renderer.numConeLights - 1);
+    }
 
     ImGui::End();
 }
