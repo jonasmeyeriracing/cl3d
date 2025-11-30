@@ -878,6 +878,145 @@ static void AddBox(std::vector<Vertex>& verts, std::vector<uint32_t>& inds,
         inds.push_back(base + i);
 }
 
+// Add a rotated box aligned to a direction (forward = direction of travel)
+static void AddOrientedBox(std::vector<Vertex>& verts, std::vector<uint32_t>& inds,
+                           const Vec3& center, const Vec3& forward, float sx, float sy, float sz)
+{
+    // Build orientation basis
+    Vec3 fwd = forward.normalized();
+    Vec3 up(0, 1, 0);
+    Vec3 right = cross(up, fwd).normalized();  // Changed order for correct handedness
+
+    // Box half-sizes: X=width, Y=height, Z=length (forward)
+    float hx = sx * 0.5f;
+    float hy = sy * 0.5f;
+    float hz = sz * 0.5f;
+
+    uint32_t base = (uint32_t)verts.size();
+
+    // Helper to transform local position to world
+    auto toWorld = [&](float lx, float ly, float lz) -> Vec3 {
+        return center + right * lx + up * ly + fwd * lz;
+    };
+
+    // Helper to transform local normal to world
+    auto normalToWorld = [&](float nx, float ny, float nz) -> Vec3 {
+        return (right * nx + up * ny + fwd * nz).normalized();
+    };
+
+    // Front face (forward +Z local = +fwd world)
+    Vec3 nFront = normalToWorld(0, 0, 1);
+    Vec3 p0 = toWorld(-hx, -hy, hz); verts.push_back({{p0.x, p0.y, p0.z}, {nFront.x, nFront.y, nFront.z}, {0,0}});
+    Vec3 p1 = toWorld( hx, -hy, hz); verts.push_back({{p1.x, p1.y, p1.z}, {nFront.x, nFront.y, nFront.z}, {1,0}});
+    Vec3 p2 = toWorld( hx,  hy, hz); verts.push_back({{p2.x, p2.y, p2.z}, {nFront.x, nFront.y, nFront.z}, {1,1}});
+    Vec3 p3 = toWorld(-hx,  hy, hz); verts.push_back({{p3.x, p3.y, p3.z}, {nFront.x, nFront.y, nFront.z}, {0,1}});
+
+    // Back face (-Z local = -fwd world)
+    Vec3 nBack = normalToWorld(0, 0, -1);
+    Vec3 p4 = toWorld( hx, -hy, -hz); verts.push_back({{p4.x, p4.y, p4.z}, {nBack.x, nBack.y, nBack.z}, {0,0}});
+    Vec3 p5 = toWorld(-hx, -hy, -hz); verts.push_back({{p5.x, p5.y, p5.z}, {nBack.x, nBack.y, nBack.z}, {1,0}});
+    Vec3 p6 = toWorld(-hx,  hy, -hz); verts.push_back({{p6.x, p6.y, p6.z}, {nBack.x, nBack.y, nBack.z}, {1,1}});
+    Vec3 p7 = toWorld( hx,  hy, -hz); verts.push_back({{p7.x, p7.y, p7.z}, {nBack.x, nBack.y, nBack.z}, {0,1}});
+
+    // Right face (+X local = +right world)
+    Vec3 nRight = normalToWorld(1, 0, 0);
+    Vec3 p8  = toWorld(hx, -hy,  hz); verts.push_back({{p8.x,  p8.y,  p8.z},  {nRight.x, nRight.y, nRight.z}, {0,0}});
+    Vec3 p9  = toWorld(hx, -hy, -hz); verts.push_back({{p9.x,  p9.y,  p9.z},  {nRight.x, nRight.y, nRight.z}, {1,0}});
+    Vec3 p10 = toWorld(hx,  hy, -hz); verts.push_back({{p10.x, p10.y, p10.z}, {nRight.x, nRight.y, nRight.z}, {1,1}});
+    Vec3 p11 = toWorld(hx,  hy,  hz); verts.push_back({{p11.x, p11.y, p11.z}, {nRight.x, nRight.y, nRight.z}, {0,1}});
+
+    // Left face (-X local = -right world)
+    Vec3 nLeft = normalToWorld(-1, 0, 0);
+    Vec3 p12 = toWorld(-hx, -hy, -hz); verts.push_back({{p12.x, p12.y, p12.z}, {nLeft.x, nLeft.y, nLeft.z}, {0,0}});
+    Vec3 p13 = toWorld(-hx, -hy,  hz); verts.push_back({{p13.x, p13.y, p13.z}, {nLeft.x, nLeft.y, nLeft.z}, {1,0}});
+    Vec3 p14 = toWorld(-hx,  hy,  hz); verts.push_back({{p14.x, p14.y, p14.z}, {nLeft.x, nLeft.y, nLeft.z}, {1,1}});
+    Vec3 p15 = toWorld(-hx,  hy, -hz); verts.push_back({{p15.x, p15.y, p15.z}, {nLeft.x, nLeft.y, nLeft.z}, {0,1}});
+
+    // Top face (+Y local = +up world)
+    Vec3 nTop = normalToWorld(0, 1, 0);
+    Vec3 p16 = toWorld(-hx, hy,  hz); verts.push_back({{p16.x, p16.y, p16.z}, {nTop.x, nTop.y, nTop.z}, {0,0}});
+    Vec3 p17 = toWorld( hx, hy,  hz); verts.push_back({{p17.x, p17.y, p17.z}, {nTop.x, nTop.y, nTop.z}, {1,0}});
+    Vec3 p18 = toWorld( hx, hy, -hz); verts.push_back({{p18.x, p18.y, p18.z}, {nTop.x, nTop.y, nTop.z}, {1,1}});
+    Vec3 p19 = toWorld(-hx, hy, -hz); verts.push_back({{p19.x, p19.y, p19.z}, {nTop.x, nTop.y, nTop.z}, {0,1}});
+
+    // Bottom face (-Y local = -up world)
+    Vec3 nBottom = normalToWorld(0, -1, 0);
+    Vec3 p20 = toWorld(-hx, -hy, -hz); verts.push_back({{p20.x, p20.y, p20.z}, {nBottom.x, nBottom.y, nBottom.z}, {0,0}});
+    Vec3 p21 = toWorld( hx, -hy, -hz); verts.push_back({{p21.x, p21.y, p21.z}, {nBottom.x, nBottom.y, nBottom.z}, {1,0}});
+    Vec3 p22 = toWorld( hx, -hy,  hz); verts.push_back({{p22.x, p22.y, p22.z}, {nBottom.x, nBottom.y, nBottom.z}, {1,1}});
+    Vec3 p23 = toWorld(-hx, -hy,  hz); verts.push_back({{p23.x, p23.y, p23.z}, {nBottom.x, nBottom.y, nBottom.z}, {0,1}});
+
+    // Indices for 6 faces (2 triangles each)
+    uint32_t faceIndices[] = {
+        0, 2, 1, 0, 3, 2,       // front
+        4, 6, 5, 4, 7, 6,       // back
+        8, 10, 9, 8, 11, 10,    // right
+        12, 14, 13, 12, 15, 14, // left
+        16, 18, 17, 16, 19, 18, // top
+        20, 22, 21, 20, 23, 22  // bottom
+    };
+
+    for (uint32_t i : faceIndices)
+        inds.push_back(base + i);
+}
+
+// Helper function to get position and direction on the oval track
+// Progress: 0-1 around the track
+// Returns position and forward direction
+static void GetTrackPositionAndDirection(float progress, float straightLength, float radius,
+                                          Vec3& outPos, Vec3& outDir)
+{
+    const float PI = 3.14159265f;
+
+    // Track layout (counterclockwise):
+    // - Bottom straight: progress 0 to 0.25 (going +X)
+    // - Right semicircle: progress 0.25 to 0.5 (turning around)
+    // - Top straight: progress 0.5 to 0.75 (going -X)
+    // - Left semicircle: progress 0.75 to 1.0 (turning around)
+
+    float totalStraight = straightLength * 2.0f;
+    float totalCurve = 2.0f * PI * radius;
+    float totalLength = totalStraight + totalCurve;
+
+    float straightFraction = totalStraight / totalLength;
+    float curveFraction = totalCurve / totalLength;
+    float singleStraightFrac = straightFraction * 0.5f;
+    float singleCurveFrac = curveFraction * 0.5f;
+
+    float halfStraight = straightLength * 0.5f;
+
+    if (progress < singleStraightFrac)
+    {
+        // Bottom straight (going +X direction)
+        float t = progress / singleStraightFrac;
+        outPos = Vec3(-halfStraight + t * straightLength, 0, -radius);
+        outDir = Vec3(1, 0, 0);
+    }
+    else if (progress < singleStraightFrac + singleCurveFrac)
+    {
+        // Right semicircle
+        float t = (progress - singleStraightFrac) / singleCurveFrac;
+        float angle = -PI * 0.5f + t * PI;  // -90 to +90 degrees
+        outPos = Vec3(halfStraight + cosf(angle) * radius, 0, sinf(angle) * radius);
+        outDir = Vec3(-sinf(angle), 0, cosf(angle));
+    }
+    else if (progress < 2.0f * singleStraightFrac + singleCurveFrac)
+    {
+        // Top straight (going -X direction)
+        float t = (progress - singleStraightFrac - singleCurveFrac) / singleStraightFrac;
+        outPos = Vec3(halfStraight - t * straightLength, 0, radius);
+        outDir = Vec3(-1, 0, 0);
+    }
+    else
+    {
+        // Left semicircle
+        float t = (progress - 2.0f * singleStraightFrac - singleCurveFrac) / singleCurveFrac;
+        float angle = PI * 0.5f + t * PI;  // +90 to +270 degrees
+        outPos = Vec3(-halfStraight + cosf(angle) * radius, 0, sinf(angle) * radius);
+        outDir = Vec3(-sinf(angle), 0, cosf(angle));
+    }
+}
+
 static bool CreateGeometry(D3D12Renderer* renderer)
 {
     std::vector<Vertex> vertices;
@@ -900,69 +1039,81 @@ static bool CreateGeometry(D3D12Renderer* renderer)
     indices.push_back(planeBase + 2);
     indices.push_back(planeBase + 3);
 
-    // Car-sized boxes: 4m long (Z), 2m wide (X), 1.5m tall (Y)
+    // Car-sized boxes: 4m long, 2m wide, 1.5m tall
     const float carLength = 4.0f;
     const float carWidth = 2.0f;
     const float carHeight = 1.5f;
 
-    // Spacing between cars
-    const float spacingX = 3.0f;  // Gap between two lanes
-    const float spacingZ = 6.0f;  // Gap between cars in a row
+    // Track parameters
+    const float straightLength = renderer->trackStraightLength;
+    const float radius = renderer->trackRadius;
+    const float laneWidth = renderer->trackLaneWidth;
+    const float PI = 3.14159265f;
 
-    // 60 cars in 2 columns, 30 rows
+    // Calculate total track length
+    renderer->trackLength = straightLength * 2.0f + 2.0f * PI * radius;
+
+    // 60 cars in 2 lanes
     const int numCars = 60;
-    const int carsPerRow = 2;
-    const int numRows = numCars / carsPerRow;
+    const int carsPerLane = numCars / 2;
+    renderer->numCars = numCars;
 
-    // Start position (in front of camera)
-    const float startZ = 0.0f;
+    // Record where car vertices start (after ground plane)
+    renderer->carVertexStartIndex = (uint32_t)vertices.size();
 
     // Headlight parameters
-    const float headlightHeight = 0.6f;           // Height from ground
-    const float headlightSpacing = 0.7f;          // Distance from center (each side)
-    const float headlightRange = 30.0f;           // 30 meters range
-    const float headlightInnerAngle = 0.15f;      // ~8.5 degrees inner cone
-    const float headlightOuterAngle = 0.35f;      // ~20 degrees outer cone
-    const Vec3 headlightColor(1.5f, 1.4f, 1.2f);  // Warm white, slightly bright
+    const float headlightHeight = 0.6f;
+    const float headlightSpacing = 0.7f;
+    const float headlightRange = 30.0f;
+    const float headlightInnerAngle = 0.15f;
+    const float headlightOuterAngle = 0.35f;
+    const Vec3 headlightColor(1.5f, 1.4f, 1.2f);
 
     renderer->numConeLights = 0;
 
-    // Initialize AABB
-    renderer->carAABB.min = Vec3(FLT_MAX, FLT_MAX, FLT_MAX);
-    renderer->carAABB.max = Vec3(-FLT_MAX, -FLT_MAX, -FLT_MAX);
+    // Initialize AABB for track bounds
+    renderer->carAABB.min = Vec3(-straightLength * 0.5f - radius - 20.0f, 0, -radius - 20.0f);
+    renderer->carAABB.max = Vec3(straightLength * 0.5f + radius + 20.0f, carHeight, radius + 20.0f);
+
+    // Spacing between cars along track (as fraction of track length)
+    float carSpacing = 1.0f / (float)carsPerLane;
 
     for (int i = 0; i < numCars; i++)
     {
-        int row = i / carsPerRow;
-        int col = i % carsPerRow;
+        int lane = i % 2;  // 0 = inner lane, 1 = outer lane
+        int posInLane = i / 2;
 
-        float x = (col == 0) ? -spacingX : spacingX;
-        float y = carHeight * 0.5f;  // Sit on ground
-        float z = startZ - row * spacingZ;
+        // Initial progress along track (evenly spaced within each lane)
+        float progress = (float)posInLane * carSpacing;
+        renderer->carTrackProgress[i] = progress;
 
-        AddBox(vertices, indices, x, y, z, carWidth, carHeight, carLength);
+        // Lane offset (negative = inner, positive = outer)
+        renderer->carLane[i] = (lane == 0) ? -laneWidth * 0.5f : laneWidth * 0.5f;
 
-        // Update AABB to include this car
-        Vec3 carMin(x - carWidth * 0.5f, 0, z - carLength * 0.5f);
-        Vec3 carMax(x + carWidth * 0.5f, carHeight, z + carLength * 0.5f);
+        // Get position and direction on track centerline
+        Vec3 trackPos, trackDir;
+        GetTrackPositionAndDirection(progress, straightLength, radius, trackPos, trackDir);
 
-        if (carMin.x < renderer->carAABB.min.x) renderer->carAABB.min.x = carMin.x;
-        if (carMin.y < renderer->carAABB.min.y) renderer->carAABB.min.y = carMin.y;
-        if (carMin.z < renderer->carAABB.min.z) renderer->carAABB.min.z = carMin.z;
-        if (carMax.x > renderer->carAABB.max.x) renderer->carAABB.max.x = carMax.x;
-        if (carMax.y > renderer->carAABB.max.y) renderer->carAABB.max.y = carMax.y;
-        if (carMax.z > renderer->carAABB.max.z) renderer->carAABB.max.z = carMax.z;
+        // Offset by lane
+        Vec3 trackRight(trackDir.z, 0, -trackDir.x);  // Perpendicular to direction
+        Vec3 carPos = trackPos + trackRight * renderer->carLane[i];
+        carPos.y = carHeight * 0.5f;
+
+        // Add car box aligned to track direction
+        AddOrientedBox(vertices, indices, carPos, trackDir, carWidth, carHeight, carLength);
 
         // Add two headlights for this car
-        // Headlights are at the front of the car (-Z direction)
-        float frontZ = z - carLength * 0.5f;
+        float frontOffset = carLength * 0.5f;
+        Vec3 frontPos = carPos + trackDir * frontOffset;
+        frontPos.y = headlightHeight;
 
         // Left headlight
         if (renderer->numConeLights < MAX_CONE_LIGHTS)
         {
+            Vec3 leftOffset = trackRight * (-headlightSpacing);
             ConeLight& light = renderer->coneLights[renderer->numConeLights++];
-            light.position = Vec3(x - headlightSpacing, headlightHeight, frontZ);
-            light.direction = Vec3(0, 0, -1);  // Pointing forward (-Z)
+            light.position = frontPos + leftOffset;
+            light.direction = trackDir;
             light.color = headlightColor;
             light.range = headlightRange;
             light.innerAngle = headlightInnerAngle;
@@ -972,9 +1123,10 @@ static bool CreateGeometry(D3D12Renderer* renderer)
         // Right headlight
         if (renderer->numConeLights < MAX_CONE_LIGHTS)
         {
+            Vec3 rightOffset = trackRight * headlightSpacing;
             ConeLight& light = renderer->coneLights[renderer->numConeLights++];
-            light.position = Vec3(x + headlightSpacing, headlightHeight, frontZ);
-            light.direction = Vec3(0, 0, -1);  // Pointing forward (-Z)
+            light.position = frontPos + rightOffset;
+            light.direction = trackDir;
             light.color = headlightColor;
             light.range = headlightRange;
             light.innerAngle = headlightInnerAngle;
@@ -983,12 +1135,7 @@ static bool CreateGeometry(D3D12Renderer* renderer)
     }
 
     // Calculate top-down orthographic view-projection matrix from AABB
-    // Looking down from above (-Y direction)
-
-    // Add some padding
-    float padding = 5.0f;
-
-    // For top-down view, X maps to screen X, Z maps to screen Y
+    float padding = 20.0f;
     float halfWidth = (renderer->carAABB.max.x - renderer->carAABB.min.x) * 0.5f + padding;
     float halfDepth = (renderer->carAABB.max.z - renderer->carAABB.min.z) * 0.5f + padding;
 
@@ -1017,6 +1164,7 @@ static bool CreateGeometry(D3D12Renderer* renderer)
     renderer->topDownViewProj = topDownProj * topDownView;
 
     renderer->indexCount = (uint32_t)indices.size();
+    renderer->carVertexCount = (uint32_t)vertices.size() - renderer->carVertexStartIndex;
 
     UINT vertexBufferSize = (UINT)(vertices.size() * sizeof(Vertex));
     UINT indexBufferSize = (UINT)(indices.size() * sizeof(uint32_t));
@@ -1042,10 +1190,12 @@ static bool CreateGeometry(D3D12Renderer* renderer)
         return false;
     }
 
+    // Keep vertex buffer mapped for dynamic car updates
     void* mappedData;
     renderer->vertexBuffer->Map(0, nullptr, &mappedData);
     memcpy(mappedData, vertices.data(), vertexBufferSize);
-    renderer->vertexBuffer->Unmap(0, nullptr);
+    // Store pointer to car vertices for updates (don't unmap)
+    renderer->carVerticesMapped = reinterpret_cast<Vertex*>(mappedData) + renderer->carVertexStartIndex;
 
     renderer->vertexBufferView.BufferLocation = renderer->vertexBuffer->GetGPUVirtualAddress();
     renderer->vertexBufferView.SizeInBytes = vertexBufferSize;
@@ -1520,6 +1670,144 @@ void D3D12_WaitForGpu(D3D12Renderer* renderer)
     WaitForFence(renderer, fenceValue);
 
     renderer->fenceValues[renderer->frameIndex]++;
+}
+
+// Update a single oriented box's vertices in place
+static void UpdateOrientedBoxVertices(Vertex* verts, const Vec3& center, const Vec3& forward,
+                                       float sx, float sy, float sz)
+{
+    // Build orientation basis
+    Vec3 fwd = forward.normalized();
+    Vec3 up(0, 1, 0);
+    Vec3 right = cross(up, fwd).normalized();  // Changed order for correct handedness
+
+    // Box half-sizes: X=width, Y=height, Z=length (forward)
+    float hx = sx * 0.5f;
+    float hy = sy * 0.5f;
+    float hz = sz * 0.5f;
+
+    // Helper to transform local position to world
+    auto toWorld = [&](float lx, float ly, float lz) -> Vec3 {
+        return center + right * lx + up * ly + fwd * lz;
+    };
+
+    // Helper to transform local normal to world
+    auto normalToWorld = [&](float nx, float ny, float nz) -> Vec3 {
+        return (right * nx + up * ny + fwd * nz).normalized();
+    };
+
+    int v = 0;
+
+    // Front face (forward +Z local = +fwd world)
+    Vec3 nFront = normalToWorld(0, 0, 1);
+    Vec3 p0 = toWorld(-hx, -hy, hz); verts[v++] = {{p0.x, p0.y, p0.z}, {nFront.x, nFront.y, nFront.z}, {0,0}};
+    Vec3 p1 = toWorld( hx, -hy, hz); verts[v++] = {{p1.x, p1.y, p1.z}, {nFront.x, nFront.y, nFront.z}, {1,0}};
+    Vec3 p2 = toWorld( hx,  hy, hz); verts[v++] = {{p2.x, p2.y, p2.z}, {nFront.x, nFront.y, nFront.z}, {1,1}};
+    Vec3 p3 = toWorld(-hx,  hy, hz); verts[v++] = {{p3.x, p3.y, p3.z}, {nFront.x, nFront.y, nFront.z}, {0,1}};
+
+    // Back face (-Z local = -fwd world)
+    Vec3 nBack = normalToWorld(0, 0, -1);
+    Vec3 p4 = toWorld( hx, -hy, -hz); verts[v++] = {{p4.x, p4.y, p4.z}, {nBack.x, nBack.y, nBack.z}, {0,0}};
+    Vec3 p5 = toWorld(-hx, -hy, -hz); verts[v++] = {{p5.x, p5.y, p5.z}, {nBack.x, nBack.y, nBack.z}, {1,0}};
+    Vec3 p6 = toWorld(-hx,  hy, -hz); verts[v++] = {{p6.x, p6.y, p6.z}, {nBack.x, nBack.y, nBack.z}, {1,1}};
+    Vec3 p7 = toWorld( hx,  hy, -hz); verts[v++] = {{p7.x, p7.y, p7.z}, {nBack.x, nBack.y, nBack.z}, {0,1}};
+
+    // Right face (+X local = +right world)
+    Vec3 nRight = normalToWorld(1, 0, 0);
+    Vec3 p8  = toWorld(hx, -hy,  hz); verts[v++] = {{p8.x,  p8.y,  p8.z},  {nRight.x, nRight.y, nRight.z}, {0,0}};
+    Vec3 p9  = toWorld(hx, -hy, -hz); verts[v++] = {{p9.x,  p9.y,  p9.z},  {nRight.x, nRight.y, nRight.z}, {1,0}};
+    Vec3 p10 = toWorld(hx,  hy, -hz); verts[v++] = {{p10.x, p10.y, p10.z}, {nRight.x, nRight.y, nRight.z}, {1,1}};
+    Vec3 p11 = toWorld(hx,  hy,  hz); verts[v++] = {{p11.x, p11.y, p11.z}, {nRight.x, nRight.y, nRight.z}, {0,1}};
+
+    // Left face (-X local = -right world)
+    Vec3 nLeft = normalToWorld(-1, 0, 0);
+    Vec3 p12 = toWorld(-hx, -hy, -hz); verts[v++] = {{p12.x, p12.y, p12.z}, {nLeft.x, nLeft.y, nLeft.z}, {0,0}};
+    Vec3 p13 = toWorld(-hx, -hy,  hz); verts[v++] = {{p13.x, p13.y, p13.z}, {nLeft.x, nLeft.y, nLeft.z}, {1,0}};
+    Vec3 p14 = toWorld(-hx,  hy,  hz); verts[v++] = {{p14.x, p14.y, p14.z}, {nLeft.x, nLeft.y, nLeft.z}, {1,1}};
+    Vec3 p15 = toWorld(-hx,  hy, -hz); verts[v++] = {{p15.x, p15.y, p15.z}, {nLeft.x, nLeft.y, nLeft.z}, {0,1}};
+
+    // Top face (+Y local = +up world)
+    Vec3 nTop = normalToWorld(0, 1, 0);
+    Vec3 p16 = toWorld(-hx, hy,  hz); verts[v++] = {{p16.x, p16.y, p16.z}, {nTop.x, nTop.y, nTop.z}, {0,0}};
+    Vec3 p17 = toWorld( hx, hy,  hz); verts[v++] = {{p17.x, p17.y, p17.z}, {nTop.x, nTop.y, nTop.z}, {1,0}};
+    Vec3 p18 = toWorld( hx, hy, -hz); verts[v++] = {{p18.x, p18.y, p18.z}, {nTop.x, nTop.y, nTop.z}, {1,1}};
+    Vec3 p19 = toWorld(-hx, hy, -hz); verts[v++] = {{p19.x, p19.y, p19.z}, {nTop.x, nTop.y, nTop.z}, {0,1}};
+
+    // Bottom face (-Y local = -up world)
+    Vec3 nBottom = normalToWorld(0, -1, 0);
+    Vec3 p20 = toWorld(-hx, -hy, -hz); verts[v++] = {{p20.x, p20.y, p20.z}, {nBottom.x, nBottom.y, nBottom.z}, {0,0}};
+    Vec3 p21 = toWorld( hx, -hy, -hz); verts[v++] = {{p21.x, p21.y, p21.z}, {nBottom.x, nBottom.y, nBottom.z}, {1,0}};
+    Vec3 p22 = toWorld( hx, -hy,  hz); verts[v++] = {{p22.x, p22.y, p22.z}, {nBottom.x, nBottom.y, nBottom.z}, {1,1}};
+    Vec3 p23 = toWorld(-hx, -hy,  hz); verts[v++] = {{p23.x, p23.y, p23.z}, {nBottom.x, nBottom.y, nBottom.z}, {0,1}};
+}
+
+// Number of vertices per oriented box (6 faces * 4 vertices)
+static constexpr int VERTS_PER_BOX = 24;
+
+void D3D12_Update(D3D12Renderer* renderer, float deltaTime)
+{
+    // Car dimensions
+    const float carLength = 4.0f;
+    const float carWidth = 2.0f;
+    const float carHeight = 1.5f;
+    const float headlightHeight = 0.6f;
+    const float headlightSpacing = 0.7f;
+
+    // Track parameters
+    float straightLength = renderer->trackStraightLength;
+    float radius = renderer->trackRadius;
+
+    // Move all cars forward
+    float progressDelta = (renderer->carSpeed * deltaTime) / renderer->trackLength;
+
+    for (uint32_t i = 0; i < renderer->numCars; i++)
+    {
+        // Update progress
+        renderer->carTrackProgress[i] += progressDelta;
+        if (renderer->carTrackProgress[i] >= 1.0f)
+            renderer->carTrackProgress[i] -= 1.0f;
+
+        float progress = renderer->carTrackProgress[i];
+        float laneOffset = renderer->carLane[i];
+
+        // Get position and direction on track
+        Vec3 trackPos, trackDir;
+        GetTrackPositionAndDirection(progress, straightLength, radius, trackPos, trackDir);
+
+        // Calculate car position with lane offset
+        Vec3 trackRight(trackDir.z, 0, -trackDir.x);
+        Vec3 carPos = trackPos + trackRight * laneOffset;
+        carPos.y = carHeight * 0.5f;
+
+        // Update car box vertices
+        Vertex* carVerts = renderer->carVerticesMapped + (i * VERTS_PER_BOX);
+        UpdateOrientedBoxVertices(carVerts, carPos, trackDir, carWidth, carHeight, carLength);
+
+        // Update headlight positions and directions (2 lights per car)
+        uint32_t lightIndex = i * 2;
+        if (lightIndex + 1 < renderer->numConeLights)
+        {
+            float frontOffset = carLength * 0.5f;
+            Vec3 frontPos = carPos + trackDir * frontOffset;
+            frontPos.y = headlightHeight;
+
+            // Left headlight
+            Vec3 leftOffset = trackRight * (-headlightSpacing);
+            renderer->coneLights[lightIndex].position = frontPos + leftOffset;
+            renderer->coneLights[lightIndex].direction = trackDir;
+
+            // Right headlight
+            Vec3 rightOffset = trackRight * headlightSpacing;
+            renderer->coneLights[lightIndex + 1].position = frontPos + rightOffset;
+            renderer->coneLights[lightIndex + 1].direction = trackDir;
+        }
+    }
+
+    // Update debug visualization if enabled
+    if (renderer->showDebugLights)
+    {
+        CreateDebugGeometry(renderer);
+    }
 }
 
 void D3D12_Render(D3D12Renderer* renderer)

@@ -160,6 +160,10 @@ static void DrawImGui(float deltaTime)
     ImGui::SliderFloat("Shadow Bias", &g_Renderer.shadowBias, -0.5f, 0.5f);
 
     ImGui::Separator();
+    ImGui::Text("Animation");
+    ImGui::SliderFloat("Car Speed (m/s)", &g_Renderer.carSpeed, 0.0f, 100.0f);
+
+    ImGui::Separator();
     ImGui::Checkbox("Show Headlight Debug", &g_Renderer.showDebugLights);
     ImGui::Text("Cone Lights: %u", g_Renderer.numConeLights);
     if (g_Renderer.activeLightCount == 0)
@@ -309,6 +313,9 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow)
         {
             float deltaTime = GetDeltaTime();
             UpdateCamera(deltaTime);
+
+            // Update car animation
+            D3D12_Update(&g_Renderer, deltaTime);
 
             // Start ImGui frame
             ImGui_ImplDX12_NewFrame();

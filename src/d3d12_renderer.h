@@ -14,6 +14,7 @@ using Microsoft::WRL::ComPtr;
 
 static constexpr uint32_t FRAME_COUNT = 2;
 static constexpr uint32_t MAX_CONE_LIGHTS = 128;
+static constexpr uint32_t MAX_CARS = 60;
 
 struct ConeLight
 {
@@ -85,6 +86,11 @@ struct D3D12Renderer
     D3D12_INDEX_BUFFER_VIEW         indexBufferView;
     uint32_t                        indexCount;
 
+    // Car vertex data (for dynamic updates)
+    Vertex*                         carVerticesMapped = nullptr;  // Points into mapped vertex buffer
+    uint32_t                        carVertexStartIndex = 0;      // First car vertex in buffer
+    uint32_t                        carVertexCount = 0;           // Total car vertices
+
     // Constant buffer (main camera)
     ComPtr<ID3D12Resource>          constantBuffer[FRAME_COUNT];
     CameraConstants*                constantBufferMapped[FRAME_COUNT];
@@ -137,6 +143,18 @@ struct D3D12Renderer
     float headlightRange = 30.0f;  // Range in meters (20-300)
     float headlightFalloff = 2.0f; // Distance falloff exponent (lower = less falloff)
 
+    // Car animation
+    uint32_t numCars = 0;
+    float carTrackProgress[MAX_CARS];  // 0-1 progress along the oval track
+    float carLane[MAX_CARS];           // Lane offset (inner/outer)
+    float carSpeed = 20.0f;            // Speed in meters per second
+
+    // Track parameters
+    float trackLength = 0.0f;          // Total track length in meters
+    float trackStraightLength = 150.0f;
+    float trackRadius = 50.0f;
+    float trackLaneWidth = 3.0f;
+
     // Car AABB for top-down rendering
     AABB carAABB;
     Mat4 topDownViewProj;
@@ -167,6 +185,7 @@ struct D3D12Renderer
 
 bool D3D12_Init(D3D12Renderer* renderer, HWND hwnd, uint32_t width, uint32_t height);
 void D3D12_Shutdown(D3D12Renderer* renderer);
+void D3D12_Update(D3D12Renderer* renderer, float deltaTime);
 void D3D12_Render(D3D12Renderer* renderer);
 void D3D12_WaitForGpu(D3D12Renderer* renderer);
 void D3D12_Resize(D3D12Renderer* renderer, uint32_t width, uint32_t height);
