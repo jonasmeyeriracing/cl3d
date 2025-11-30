@@ -2,6 +2,8 @@
 #include "imgui.h"
 #include "imgui_impl_win32.h"
 #include "imgui_impl_dx12.h"
+#include <cstdio>
+#include <cmath>
 
 // Forward declare message handler from imgui_impl_win32.cpp
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -114,6 +116,95 @@ static void UpdateCamera(float deltaTime)
     }
 }
 
+// HSV to RGB conversion (matching shader function)
+static ImU32 HSVtoImColor(float h, float s, float v)
+{
+    float c = v * s;
+    float hPrime = h * 6.0f;
+    float x = c * (1.0f - fabsf(fmodf(hPrime, 2.0f) - 1.0f));
+    float m = v - c;
+
+    float r, g, b;
+    if (hPrime < 1.0f) { r = c; g = x; b = 0.0f; }
+    else if (hPrime < 2.0f) { r = x; g = c; b = 0.0f; }
+    else if (hPrime < 3.0f) { r = 0.0f; g = c; b = x; }
+    else if (hPrime < 4.0f) { r = 0.0f; g = x; b = c; }
+    else if (hPrime < 5.0f) { r = x; g = 0.0f; b = c; }
+    else { r = c; g = 0.0f; b = x; }
+
+    return IM_COL32((int)((r + m) * 255), (int)((g + m) * 255), (int)((b + m) * 255), 255);
+}
+
+// Map intensity [0, 1] to heat color using hue [0, 0.9]
+static ImU32 IntensityToHeatImColor(float intensity)
+{
+    float hue = intensity * 0.9f;
+    return HSVtoImColor(hue, 1.0f, 1.0f);
+}
+
+static void DrawHeatMapLegend(float maxCount)
+{
+    ImDrawList* drawList = ImGui::GetBackgroundDrawList();
+    ImVec2 displaySize = ImGui::GetIO().DisplaySize;
+
+    const float margin = 10.0f;
+    const float width = 20.0f;
+    const float legendHeight = displaySize.y - 2 * margin;
+    const float x = displaySize.x - margin - width;
+
+    // Draw gradient as vertical strips
+    const int segments = 64;
+
+    for (int i = 0; i < segments; i++)
+    {
+        float t0 = (float)i / segments;
+        float t1 = (float)(i + 1) / segments;
+
+        // Bottom to top: t=0 at bottom (red), t=1 at top (magenta)
+        float y0 = displaySize.y - margin - t0 * legendHeight;
+        float y1 = displaySize.y - margin - t1 * legendHeight;
+
+        ImU32 color0 = IntensityToHeatImColor(t0);
+        ImU32 color1 = IntensityToHeatImColor(t1);
+
+        drawList->AddRectFilledMultiColor(
+            ImVec2(x, y1), ImVec2(x + width, y0),
+            color1, color1, color0, color0);
+    }
+
+    // Draw border
+    drawList->AddRect(
+        ImVec2(x, margin), ImVec2(x + width, displaySize.y - margin),
+        IM_COL32(255, 255, 255, 200));
+
+    // Draw labels at 0%, 25%, 50%, 75%, 100%
+    char label[32];
+    const float labelOffsetX = 30.0f;
+    const float labelOffsetY = 6.0f;  // Center text vertically on tick
+
+    // 100% (top)
+    snprintf(label, sizeof(label), "%.0f", maxCount);
+    drawList->AddText(ImVec2(x - labelOffsetX, margin - labelOffsetY), IM_COL32(255, 255, 255, 255), label);
+
+    // 75%
+    float y75 = displaySize.y - margin - 0.75f * legendHeight;
+    snprintf(label, sizeof(label), "%.0f", maxCount * 0.75f);
+    drawList->AddText(ImVec2(x - labelOffsetX, y75 - labelOffsetY), IM_COL32(255, 255, 255, 255), label);
+
+    // 50%
+    float y50 = displaySize.y - margin - 0.5f * legendHeight;
+    snprintf(label, sizeof(label), "%.0f", maxCount * 0.5f);
+    drawList->AddText(ImVec2(x - labelOffsetX, y50 - labelOffsetY), IM_COL32(255, 255, 255, 255), label);
+
+    // 25%
+    float y25 = displaySize.y - margin - 0.25f * legendHeight;
+    snprintf(label, sizeof(label), "%.0f", maxCount * 0.25f);
+    drawList->AddText(ImVec2(x - labelOffsetX, y25 - labelOffsetY), IM_COL32(255, 255, 255, 255), label);
+
+    // 0% (bottom)
+    drawList->AddText(ImVec2(x - labelOffsetX + 20, displaySize.y - margin - labelOffsetY), IM_COL32(255, 255, 255, 255), "0");
+}
+
 static void DrawImGui(float deltaTime)
 {
     // Store frame time
@@ -171,6 +262,7 @@ static void DrawImGui(float deltaTime)
     if (g_Renderer.showLightOverlap)
     {
         ImGui::SliderFloat("Overlap Max", &g_Renderer.overlapMaxCount, 1.0f, 120.0f);
+        DrawHeatMapLegend(g_Renderer.overlapMaxCount);
     }
     ImGui::Text("Cone Lights: %u", g_Renderer.numConeLights);
     if (g_Renderer.activeLightCount == 0)
