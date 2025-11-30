@@ -154,7 +154,9 @@ static void DrawImGui(float deltaTime)
     ImGui::Separator();
     ImGui::Text("Lighting");
     ImGui::SliderFloat("Ambient", &g_Renderer.ambientIntensity, 0.0f, 1.0f);
-    ImGui::SliderFloat("Headlight Intensity", &g_Renderer.coneLightIntensity, 0.0f, 3.0f);
+    ImGui::SliderFloat("Headlight Intensity", &g_Renderer.coneLightIntensity, 0.0f, 100.0f);
+    ImGui::SliderFloat("Headlight Range", &g_Renderer.headlightRange, 20.0f, 300.0f);
+    ImGui::SliderFloat("Headlight Falloff", &g_Renderer.headlightFalloff, 0.0f, 4.0f);
     ImGui::SliderFloat("Shadow Bias", &g_Renderer.shadowBias, -0.5f, 0.5f);
 
     ImGui::Separator();

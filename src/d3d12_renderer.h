@@ -53,7 +53,7 @@ struct CameraConstants
     float ambientIntensity;
     float coneLightIntensity;
     float shadowBias;
-    float padding;
+    float falloffExponent;
 };
 
 struct AABB
@@ -134,6 +134,8 @@ struct D3D12Renderer
     float ambientIntensity = 0.3f;
     float coneLightIntensity = 1.0f;
     float shadowBias = 0.0f;
+    float headlightRange = 30.0f;  // Range in meters (20-300)
+    float headlightFalloff = 2.0f; // Distance falloff exponent (lower = less falloff)
 
     // Car AABB for top-down rendering
     AABB carAABB;

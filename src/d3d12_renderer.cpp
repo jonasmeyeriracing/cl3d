@@ -217,7 +217,7 @@ cbuffer CameraConstants : register(b0)
     float ambientIntensity;
     float coneLightIntensity;
     float shadowBias;
-    float padding;
+    float falloffExponent;
 };
 
 struct ConeLight
@@ -309,7 +309,7 @@ float3 CalculateConeLightContribution(float3 worldPos, float3 normal, ConeLight 
 
     float coneAtten = saturate((cosAngle - cosOuter) / (cosInner - cosOuter));
     float distAtten = saturate(1.0 - dist / range);
-    distAtten *= distAtten;
+    distAtten = pow(distAtten, falloffExponent);
     float ndotl = saturate(dot(normal, toLightNorm));
 
     // Compute shadow inline
@@ -1084,7 +1084,7 @@ static bool CreateDebugGeometry(D3D12Renderer* renderer)
         const ConeLight& light = renderer->coneLights[i];
         Vec3 pos = light.position;
         Vec3 dir = light.direction;
-        float range = light.range;
+        float range = renderer->headlightRange;  // Use slider value
         float outerAngle = light.outerAngle;
 
         // Calculate basis vectors perpendicular to direction
@@ -1538,6 +1538,7 @@ void D3D12_Render(D3D12Renderer* renderer)
     cb->ambientIntensity = renderer->ambientIntensity;
     cb->coneLightIntensity = renderer->coneLightIntensity;
     cb->shadowBias = renderer->shadowBias;
+    cb->falloffExponent = renderer->headlightFalloff;
 
     // Update shadow constant buffer with top-down view
     CameraConstants* shadowCb = renderer->shadowConstantBufferMapped[renderer->frameIndex];
@@ -1547,8 +1548,10 @@ void D3D12_Render(D3D12Renderer* renderer)
     shadowCb->ambientIntensity = renderer->ambientIntensity;
     shadowCb->coneLightIntensity = renderer->coneLightIntensity;
     shadowCb->shadowBias = renderer->shadowBias;
+    shadowCb->falloffExponent = renderer->headlightFalloff;
 
-    // Update cone lights buffer
+    // Update cone lights buffer (use slider-controlled range)
+    float currentRange = renderer->headlightRange;
     ConeLightGPU* lightsGPU = renderer->coneLightsMapped[renderer->frameIndex];
     for (uint32_t i = 0; i < renderer->numConeLights; ++i)
     {
@@ -1556,7 +1559,7 @@ void D3D12_Render(D3D12Renderer* renderer)
         lightsGPU[i].position[0] = light.position.x;
         lightsGPU[i].position[1] = light.position.y;
         lightsGPU[i].position[2] = light.position.z;
-        lightsGPU[i].position[3] = light.range;
+        lightsGPU[i].position[3] = currentRange;  // Use slider value
         lightsGPU[i].direction[0] = light.direction.x;
         lightsGPU[i].direction[1] = light.direction.y;
         lightsGPU[i].direction[2] = light.direction.z;
@@ -1574,13 +1577,13 @@ void D3D12_Render(D3D12Renderer* renderer)
         const ConeLight& light = renderer->coneLights[i];
 
         // View matrix: look from light position along light direction
-        Vec3 target = light.position + light.direction * light.range;
+        Vec3 target = light.position + light.direction * currentRange;
         Vec3 up = (fabsf(light.direction.y) < 0.99f) ? Vec3(0, 1, 0) : Vec3(1, 0, 0);
         Mat4 view = Mat4::lookAt(light.position, target, up);
 
         // Perspective projection using outer cone angle
         float fov = light.outerAngle * 2.0f;  // Full cone angle
-        Mat4 proj = Mat4::perspective(fov, 1.0f, 0.1f, light.range);
+        Mat4 proj = Mat4::perspective(fov, 1.0f, 0.1f, currentRange);
 
         renderer->coneLightViewProj[i] = proj * view;
         lightMatrices[i] = renderer->coneLightViewProj[i];
