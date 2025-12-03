@@ -178,8 +178,9 @@ static bool CreateConeShadowMaps(D3D12Renderer* renderer)
     }
 
     // Create SRV descriptor heap (shader visible, for sampling in main pass)
+    // 2 descriptors: cone shadow maps (t2) and horizon maps (t3)
     D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc = {};
-    srvHeapDesc.NumDescriptors = 1;
+    srvHeapDesc.NumDescriptors = 2;
     srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
     srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 
@@ -208,6 +209,303 @@ static bool CreateConeShadowMaps(D3D12Renderer* renderer)
     return true;
 }
 
+// Compute shader for horizon mapping - traces from light position through height map
+// Stores the minimum height the light must be at to be visible from each texel
+static const char* g_HorizonComputeShaderSource = R"(
+// Height map from top-down rendering
+Texture2D<float> heightMap : register(t0);
+
+// Output horizon map (one slice per light) - stores required light height for visibility
+RWTexture2DArray<float> horizonMaps : register(u0);
+
+cbuffer HorizonParams : register(b0)
+{
+    float3 lightPos;
+    float worldSize;
+    float3 worldMin;
+    uint lightIndex;
+    uint mapSize;
+    float nearPlaneY;    // World Y at depth=0
+    float farPlaneY;     // World Y at depth=1
+    float padding;
+};
+
+// Convert depth buffer value to world-space Y height
+float DepthToWorldY(float depth)
+{
+    // Linear interpolation: depth=0 -> nearPlaneY, depth=1 -> farPlaneY
+    return nearPlaneY + depth * (farPlaneY - nearPlaneY);
+}
+
+[numthreads(16, 16, 1)]
+void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    if (dispatchThreadId.x >= mapSize || dispatchThreadId.y >= mapSize)
+        return;
+
+    // Convert texel to world XZ position
+    float2 uv = (float2(dispatchThreadId.xy) + 0.5) / float(mapSize);
+    float2 worldXZ;
+    worldXZ.x = worldMin.x + uv.x * worldSize;
+    worldXZ.y = worldMin.z + uv.y * worldSize;
+
+    // Direction from this texel toward the light (in XZ plane)
+    float2 toLightXZ = float2(lightPos.x, lightPos.z) - worldXZ;
+    float distToLightXZ = length(toLightXZ);
+
+    // If light is directly above this texel, no horizon occlusion
+    if (distToLightXZ < 0.001)
+    {
+        horizonMaps[uint3(dispatchThreadId.xy, lightIndex)] = -1000.0;  // Any height is visible
+        return;
+    }
+
+    float2 dirToLight = toLightXZ / distToLightXZ;
+
+    // Trace from this texel toward the light, find the maximum required height
+    // The light must be above this height to illuminate this texel
+    float maxRequiredHeight = -1000.0;  // Start very low (no occlusion)
+
+    float2 currentTexel = float2(dispatchThreadId.xy) + 0.5;
+
+    // Trace in texel steps toward the light
+    int maxSteps = int(mapSize);
+    for (int step = 1; step < maxSteps; ++step)
+    {
+        // Move one texel toward the light
+        float2 sampleTexel = currentTexel + dirToLight * float(step);
+
+        // Check bounds
+        if (sampleTexel.x < 0 || sampleTexel.x >= float(mapSize) ||
+            sampleTexel.y < 0 || sampleTexel.y >= float(mapSize))
+            break;
+
+        // Get world XZ of sample
+        float2 sampleUV = sampleTexel / float(mapSize);
+        float2 sampleWorldXZ = float2(worldMin.x + sampleUV.x * worldSize,
+                                       worldMin.z + sampleUV.y * worldSize);
+
+        // Distance from our texel to this sample
+        float sampleDistXZ = length(sampleWorldXZ - worldXZ);
+
+        // Have we passed the light?
+        if (sampleDistXZ > distToLightXZ)
+            break;
+
+        // Sample depth and convert to world Y height
+        float depthSample = heightMap.Load(int3(int2(sampleTexel), 0));
+        float sampleHeight = DepthToWorldY(depthSample);
+
+        // Calculate what height the light would need to be at to clear this obstacle
+        // Using similar triangles: requiredHeight / distToLight = sampleHeight / sampleDist
+        // requiredHeight = sampleHeight * distToLight / sampleDist
+        if (sampleDistXZ > 0.001)
+        {
+            float requiredHeight = sampleHeight * distToLightXZ / sampleDistXZ;
+            maxRequiredHeight = max(maxRequiredHeight, requiredHeight);
+        }
+    }
+
+    // Store the minimum height the light needs to be at to illuminate this texel
+    horizonMaps[uint3(dispatchThreadId.xy, lightIndex)] = maxRequiredHeight;
+}
+)";
+
+static bool CreateHorizonMappingResources(D3D12Renderer* renderer)
+{
+    D3D12_HEAP_PROPERTIES defaultHeapProps = {};
+    defaultHeapProps.Type = D3D12_HEAP_TYPE_DEFAULT;
+
+    D3D12_HEAP_PROPERTIES uploadHeapProps = {};
+    uploadHeapProps.Type = D3D12_HEAP_TYPE_UPLOAD;
+
+    // Create height map texture (R32_FLOAT, will be rendered to via copy from depth buffer)
+    D3D12_RESOURCE_DESC heightMapDesc = {};
+    heightMapDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    heightMapDesc.Width = D3D12Renderer::HORIZON_MAP_SIZE;
+    heightMapDesc.Height = D3D12Renderer::HORIZON_MAP_SIZE;
+    heightMapDesc.DepthOrArraySize = 1;
+    heightMapDesc.MipLevels = 1;
+    heightMapDesc.Format = DXGI_FORMAT_R32_FLOAT;
+    heightMapDesc.SampleDesc.Count = 1;
+    heightMapDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+
+    if (FAILED(renderer->device->CreateCommittedResource(
+        &defaultHeapProps,
+        D3D12_HEAP_FLAG_NONE,
+        &heightMapDesc,
+        D3D12_RESOURCE_STATE_COPY_DEST,
+        nullptr,
+        IID_PPV_ARGS(&renderer->horizonHeightMap))))
+    {
+        OutputDebugStringA("Failed to create horizon height map\n");
+        return false;
+    }
+
+    // Create horizon maps texture array (R32_FLOAT, one per light)
+    D3D12_RESOURCE_DESC horizonMapsDesc = {};
+    horizonMapsDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    horizonMapsDesc.Width = D3D12Renderer::HORIZON_MAP_SIZE;
+    horizonMapsDesc.Height = D3D12Renderer::HORIZON_MAP_SIZE;
+    horizonMapsDesc.DepthOrArraySize = MAX_CONE_LIGHTS;
+    horizonMapsDesc.MipLevels = 1;
+    horizonMapsDesc.Format = DXGI_FORMAT_R32_FLOAT;
+    horizonMapsDesc.SampleDesc.Count = 1;
+    horizonMapsDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+
+    if (FAILED(renderer->device->CreateCommittedResource(
+        &defaultHeapProps,
+        D3D12_HEAP_FLAG_NONE,
+        &horizonMapsDesc,
+        D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+        nullptr,
+        IID_PPV_ARGS(&renderer->horizonMaps))))
+    {
+        OutputDebugStringA("Failed to create horizon maps texture array\n");
+        return false;
+    }
+
+    // Create descriptor heap for horizon mapping (SRV for height map, UAV for horizon maps, SRV for horizon maps)
+    D3D12_DESCRIPTOR_HEAP_DESC heapDesc = {};
+    heapDesc.NumDescriptors = 3;  // Height map SRV, horizon maps UAV, horizon maps SRV
+    heapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+    heapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+
+    if (FAILED(renderer->device->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&renderer->horizonSrvUavHeap))))
+    {
+        OutputDebugStringA("Failed to create horizon SRV/UAV heap\n");
+        return false;
+    }
+
+    UINT descriptorSize = renderer->device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    D3D12_CPU_DESCRIPTOR_HANDLE heapHandle = renderer->horizonSrvUavHeap->GetCPUDescriptorHandleForHeapStart();
+
+    // Descriptor 0: Height map SRV
+    D3D12_SHADER_RESOURCE_VIEW_DESC heightSrvDesc = {};
+    heightSrvDesc.Format = DXGI_FORMAT_R32_FLOAT;
+    heightSrvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    heightSrvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    heightSrvDesc.Texture2D.MipLevels = 1;
+    renderer->device->CreateShaderResourceView(renderer->horizonHeightMap.Get(), &heightSrvDesc, heapHandle);
+
+    // Descriptor 1: Horizon maps UAV
+    heapHandle.ptr += descriptorSize;
+    D3D12_UNORDERED_ACCESS_VIEW_DESC horizonUavDesc = {};
+    horizonUavDesc.Format = DXGI_FORMAT_R32_FLOAT;
+    horizonUavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
+    horizonUavDesc.Texture2DArray.MipSlice = 0;
+    horizonUavDesc.Texture2DArray.FirstArraySlice = 0;
+    horizonUavDesc.Texture2DArray.ArraySize = MAX_CONE_LIGHTS;
+    renderer->device->CreateUnorderedAccessView(renderer->horizonMaps.Get(), nullptr, &horizonUavDesc, heapHandle);
+
+    // Descriptor 2: Horizon maps SRV (for main shader sampling)
+    heapHandle.ptr += descriptorSize;
+    D3D12_SHADER_RESOURCE_VIEW_DESC horizonSrvDesc = {};
+    horizonSrvDesc.Format = DXGI_FORMAT_R32_FLOAT;
+    horizonSrvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
+    horizonSrvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    horizonSrvDesc.Texture2DArray.MipLevels = 1;
+    horizonSrvDesc.Texture2DArray.FirstArraySlice = 0;
+    horizonSrvDesc.Texture2DArray.ArraySize = MAX_CONE_LIGHTS;
+    renderer->device->CreateShaderResourceView(renderer->horizonMaps.Get(), &horizonSrvDesc, heapHandle);
+
+    // Create compute root signature
+    D3D12_ROOT_PARAMETER computeParams[3] = {};
+
+    // Constant buffer with light params at b0
+    computeParams[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+    computeParams[0].Constants.ShaderRegister = 0;
+    computeParams[0].Constants.RegisterSpace = 0;
+    computeParams[0].Constants.Num32BitValues = 12;  // float3 lightPos, float worldSize, float3 worldMin, uint lightIndex, uint mapSize, float3 padding
+    computeParams[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+
+    // Height map SRV at t0
+    D3D12_DESCRIPTOR_RANGE srvRange = {};
+    srvRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+    srvRange.NumDescriptors = 1;
+    srvRange.BaseShaderRegister = 0;
+    srvRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+
+    computeParams[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    computeParams[1].DescriptorTable.NumDescriptorRanges = 1;
+    computeParams[1].DescriptorTable.pDescriptorRanges = &srvRange;
+    computeParams[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+
+    // Horizon maps UAV at u0
+    D3D12_DESCRIPTOR_RANGE uavRange = {};
+    uavRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
+    uavRange.NumDescriptors = 1;
+    uavRange.BaseShaderRegister = 0;
+    uavRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+
+    computeParams[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    computeParams[2].DescriptorTable.NumDescriptorRanges = 1;
+    computeParams[2].DescriptorTable.pDescriptorRanges = &uavRange;
+    computeParams[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+
+    D3D12_ROOT_SIGNATURE_DESC computeRootSigDesc = {};
+    computeRootSigDesc.NumParameters = 3;
+    computeRootSigDesc.pParameters = computeParams;
+    computeRootSigDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
+
+    ComPtr<ID3DBlob> signature;
+    ComPtr<ID3DBlob> error;
+    if (FAILED(D3D12SerializeRootSignature(&computeRootSigDesc, D3D_ROOT_SIGNATURE_VERSION_1, &signature, &error)))
+    {
+        if (error) OutputDebugStringA((char*)error->GetBufferPointer());
+        return false;
+    }
+
+    if (FAILED(renderer->device->CreateRootSignature(0, signature->GetBufferPointer(),
+        signature->GetBufferSize(), IID_PPV_ARGS(&renderer->horizonComputeRootSig))))
+    {
+        OutputDebugStringA("Failed to create horizon compute root signature\n");
+        return false;
+    }
+
+    // Compile compute shader
+    UINT compileFlags = 0;
+#ifdef _DEBUG
+    compileFlags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
+#endif
+
+    ComPtr<ID3DBlob> computeShader;
+    if (FAILED(D3DCompile(g_HorizonComputeShaderSource, strlen(g_HorizonComputeShaderSource), "horizon.hlsl", nullptr, nullptr,
+        "CSMain", "cs_5_0", compileFlags, 0, &computeShader, &error)))
+    {
+        if (error) OutputDebugStringA((char*)error->GetBufferPointer());
+        return false;
+    }
+
+    // Create compute PSO
+    D3D12_COMPUTE_PIPELINE_STATE_DESC computePsoDesc = {};
+    computePsoDesc.pRootSignature = renderer->horizonComputeRootSig.Get();
+    computePsoDesc.CS = { computeShader->GetBufferPointer(), computeShader->GetBufferSize() };
+
+    if (FAILED(renderer->device->CreateComputePipelineState(&computePsoDesc, IID_PPV_ARGS(&renderer->horizonComputePSO))))
+    {
+        OutputDebugStringA("Failed to create horizon compute PSO\n");
+        return false;
+    }
+
+    // Add horizon maps SRV to coneShadowSrvHeap at descriptor slot 1 for main render pass
+    UINT mainHeapDescriptorSize = renderer->device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    D3D12_CPU_DESCRIPTOR_HANDLE mainHeapHandle = renderer->coneShadowSrvHeap->GetCPUDescriptorHandleForHeapStart();
+    mainHeapHandle.ptr += mainHeapDescriptorSize;  // Skip to descriptor 1
+
+    D3D12_SHADER_RESOURCE_VIEW_DESC horizonMainSrvDesc = {};
+    horizonMainSrvDesc.Format = DXGI_FORMAT_R32_FLOAT;
+    horizonMainSrvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
+    horizonMainSrvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    horizonMainSrvDesc.Texture2DArray.MipLevels = 1;
+    horizonMainSrvDesc.Texture2DArray.FirstArraySlice = 0;
+    horizonMainSrvDesc.Texture2DArray.ArraySize = MAX_CONE_LIGHTS;
+    renderer->device->CreateShaderResourceView(renderer->horizonMaps.Get(), &horizonMainSrvDesc, mainHeapHandle);
+
+    OutputDebugStringA("Horizon mapping resources created successfully\n");
+    return true;
+}
+
 static const char* g_ShaderSource = R"(
 cbuffer CameraConstants : register(b0)
 {
@@ -221,7 +519,10 @@ cbuffer CameraConstants : register(b0)
     float debugLightOverlap;
     float overlapMaxCount;
     float disableShadows;
-    float cbPadding;
+    float useHorizonMapping;
+    float horizonWorldMinX;
+    float horizonWorldMinZ;
+    float horizonWorldSize;
 };
 
 struct ConeLight
@@ -234,7 +535,9 @@ struct ConeLight
 StructuredBuffer<ConeLight> coneLights : register(t0);
 StructuredBuffer<float4x4> lightMatrices : register(t1);
 Texture2DArray<float> coneShadowMaps : register(t2);
+Texture2DArray<float> horizonMaps : register(t3);
 SamplerComparisonState shadowSampler : register(s0);
+SamplerState linearSampler : register(s1);
 
 struct VSInput
 {
@@ -327,6 +630,27 @@ float3 IntensityToHeatColor(float intensity)
     return HSVtoRGB(hue, 1.0, 1.0);
 }
 
+// Calculate horizon-based shadow using precomputed required light heights
+float CalculateHorizonShadow(float3 worldPos, float3 lightPos, int lightIndex)
+{
+    // Convert world position to horizon map UV
+    float2 uv;
+    uv.x = (worldPos.x - horizonWorldMinX) / horizonWorldSize;
+    uv.y = (worldPos.z - horizonWorldMinZ) / horizonWorldSize;
+
+    // Check bounds
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0)
+        return 1.0;  // Outside horizon map, no shadow
+
+    // Sample the required height for the light to be visible at this position
+    float requiredHeight = horizonMaps.SampleLevel(linearSampler, float3(uv, lightIndex), 0);
+
+    // If the light's actual height is above the required height, it's visible (lit)
+    // Add small bias to reduce self-shadowing artifacts
+    float bias = 0.1;
+    return (lightPos.y > requiredHeight + bias) ? 1.0 : 0.0;
+}
+
 float3 CalculateConeLightContribution(float3 worldPos, float3 normal, ConeLight light, int lightIndex)
 {
     float3 lightPos = light.positionAndRange.xyz;
@@ -353,18 +677,27 @@ float3 CalculateConeLightContribution(float3 worldPos, float3 normal, ConeLight 
     float shadow = 1.0;
     if (disableShadows < 0.5)
     {
-        float4x4 lightVP = lightMatrices[lightIndex];
-        float4 lightSpacePos = mul(lightVP, float4(worldPos, 1.0));
-        float3 projCoords = lightSpacePos.xyz / lightSpacePos.w;
+        if (useHorizonMapping > 0.5)
+        {
+            // Use horizon mapping for shadows
+            shadow = CalculateHorizonShadow(worldPos, lightPos, lightIndex);
+        }
+        else
+        {
+            // Use traditional shadow mapping
+            float4x4 lightVP = lightMatrices[lightIndex];
+            float4 lightSpacePos = mul(lightVP, float4(worldPos, 1.0));
+            float3 projCoords = lightSpacePos.xyz / lightSpacePos.w;
 
-        float2 shadowUV = projCoords.xy * 0.5 + 0.5;
-        shadowUV.y = 1.0 - shadowUV.y;
+            float2 shadowUV = projCoords.xy * 0.5 + 0.5;
+            shadowUV.y = 1.0 - shadowUV.y;
 
-        int3 texCoord = int3(shadowUV * 256.0, lightIndex);
-        float shadowDepth = coneShadowMaps.Load(int4(texCoord, 0));
+            int3 texCoord = int3(shadowUV * 256.0, lightIndex);
+            float shadowDepth = coneShadowMaps.Load(int4(texCoord, 0));
 
-        // Shadow comparison: lit if fragment depth <= shadow depth + bias
-        shadow = (projCoords.z <= shadowDepth + shadowBias) ? 1.0 : 0.0;
+            // Shadow comparison: lit if fragment depth <= shadow depth + bias
+            shadow = (projCoords.z <= shadowDepth + shadowBias) ? 1.0 : 0.0;
+        }
     }
 
     return lightColor * ndotl * coneAtten * distAtten * shadow;
@@ -556,7 +889,8 @@ static bool CreatePipelineState(D3D12Renderer* renderer)
     // - SRV for light matrices (t1)
     // - Descriptor table for cone shadow maps (t2)
     // - Root constants for shadow pass view-projection (b1) - 16 floats
-    D3D12_ROOT_PARAMETER rootParams[5] = {};
+    // - Descriptor table for horizon maps (t3)
+    D3D12_ROOT_PARAMETER rootParams[6] = {};
 
     // Camera constants CBV at b0
     rootParams[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
@@ -596,23 +930,47 @@ static bool CreatePipelineState(D3D12Renderer* renderer)
     rootParams[4].Constants.Num32BitValues = 16;
     rootParams[4].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
 
-    // Static sampler for shadow comparison
-    D3D12_STATIC_SAMPLER_DESC shadowSampler = {};
-    shadowSampler.Filter = D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT;
-    shadowSampler.AddressU = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
-    shadowSampler.AddressV = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
-    shadowSampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
-    shadowSampler.ComparisonFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
-    shadowSampler.BorderColor = D3D12_STATIC_BORDER_COLOR_OPAQUE_WHITE;
-    shadowSampler.ShaderRegister = 0;
-    shadowSampler.RegisterSpace = 0;
-    shadowSampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+    // Horizon maps descriptor table at t3
+    D3D12_DESCRIPTOR_RANGE horizonMapRange = {};
+    horizonMapRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+    horizonMapRange.NumDescriptors = 1;
+    horizonMapRange.BaseShaderRegister = 3;
+    horizonMapRange.RegisterSpace = 0;
+    horizonMapRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+
+    rootParams[5].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    rootParams[5].DescriptorTable.NumDescriptorRanges = 1;
+    rootParams[5].DescriptorTable.pDescriptorRanges = &horizonMapRange;
+    rootParams[5].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
+    // Static samplers
+    D3D12_STATIC_SAMPLER_DESC staticSamplers[2] = {};
+
+    // Shadow comparison sampler at s0
+    staticSamplers[0].Filter = D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT;
+    staticSamplers[0].AddressU = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
+    staticSamplers[0].AddressV = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
+    staticSamplers[0].AddressW = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
+    staticSamplers[0].ComparisonFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+    staticSamplers[0].BorderColor = D3D12_STATIC_BORDER_COLOR_OPAQUE_WHITE;
+    staticSamplers[0].ShaderRegister = 0;
+    staticSamplers[0].RegisterSpace = 0;
+    staticSamplers[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
+    // Linear sampler at s1 (for horizon map sampling)
+    staticSamplers[1].Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+    staticSamplers[1].AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    staticSamplers[1].AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    staticSamplers[1].AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    staticSamplers[1].ShaderRegister = 1;
+    staticSamplers[1].RegisterSpace = 0;
+    staticSamplers[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 
     D3D12_ROOT_SIGNATURE_DESC rootSigDesc = {};
-    rootSigDesc.NumParameters = 5;
+    rootSigDesc.NumParameters = 6;
     rootSigDesc.pParameters = rootParams;
-    rootSigDesc.NumStaticSamplers = 1;
-    rootSigDesc.pStaticSamplers = &shadowSampler;
+    rootSigDesc.NumStaticSamplers = 2;
+    rootSigDesc.pStaticSamplers = staticSamplers;
     rootSigDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
 
     ComPtr<ID3DBlob> signature;
@@ -1243,6 +1601,10 @@ static bool CreateGeometry(D3D12Renderer* renderer)
     Mat4 topDownProj = Mat4::orthographic(-halfSize, halfSize, -halfSize, halfSize, nearZ, farZ);
     renderer->topDownViewProj = topDownProj * topDownView;
 
+    // Store horizon mapping world bounds (matches the top-down view)
+    renderer->horizonWorldMin = Vec3(eyePos.x - halfSize, 0, eyePos.z - halfSize);
+    renderer->horizonWorldSize = halfSize * 2.0f;
+
     renderer->indexCount = (uint32_t)indices.size();
     renderer->carVertexCount = (uint32_t)vertices.size() - renderer->carVertexStartIndex;
 
@@ -1640,6 +2002,13 @@ bool D3D12_Init(D3D12Renderer* renderer, HWND hwnd, uint32_t width, uint32_t hei
         return false;
     }
 
+    // Create horizon mapping resources
+    if (!CreateHorizonMappingResources(renderer))
+    {
+        OutputDebugStringA("Failed to create horizon mapping resources\n");
+        return false;
+    }
+
     // Create fullscreen pipeline for depth visualization (after shadow buffer)
     if (!CreateFullscreenPipeline(renderer))
     {
@@ -1927,6 +2296,10 @@ void D3D12_Render(D3D12Renderer* renderer)
     cb->debugLightOverlap = renderer->showLightOverlap ? 1.0f : 0.0f;
     cb->overlapMaxCount = renderer->overlapMaxCount;
     cb->disableShadows = renderer->disableShadows ? 1.0f : 0.0f;
+    cb->useHorizonMapping = renderer->useHorizonMapping ? 1.0f : 0.0f;
+    cb->horizonWorldMinX = renderer->horizonWorldMin.x;
+    cb->horizonWorldMinZ = renderer->horizonWorldMin.z;
+    cb->horizonWorldSize = renderer->horizonWorldSize;
 
     // Update shadow constant buffer with top-down view
     CameraConstants* shadowCb = renderer->shadowConstantBufferMapped[renderer->frameIndex];
@@ -2055,6 +2428,118 @@ void D3D12_Render(D3D12Renderer* renderer)
         renderer->commandList->DrawIndexedInstanced(carIndexCount, 1, 6, 0, 0);
     }
 
+    // ========== Horizon Mapping Compute Pass ==========
+    if (renderer->useHorizonMapping)
+    {
+        // Transition shadow depth buffer to copy source
+        D3D12_RESOURCE_BARRIER copyBarriers[2] = {};
+        copyBarriers[0].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        copyBarriers[0].Transition.pResource = renderer->shadowDepthBuffer.Get();
+        copyBarriers[0].Transition.StateBefore = D3D12_RESOURCE_STATE_DEPTH_WRITE;
+        copyBarriers[0].Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
+        copyBarriers[0].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+
+        copyBarriers[1].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        copyBarriers[1].Transition.pResource = renderer->horizonHeightMap.Get();
+        copyBarriers[1].Transition.StateBefore = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+        copyBarriers[1].Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
+        copyBarriers[1].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+
+        renderer->commandList->ResourceBarrier(2, copyBarriers);
+
+        // Copy shadow depth buffer to height map texture
+        D3D12_TEXTURE_COPY_LOCATION srcLoc = {};
+        srcLoc.pResource = renderer->shadowDepthBuffer.Get();
+        srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+        srcLoc.SubresourceIndex = 0;
+
+        D3D12_TEXTURE_COPY_LOCATION dstLoc = {};
+        dstLoc.pResource = renderer->horizonHeightMap.Get();
+        dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+        dstLoc.SubresourceIndex = 0;
+
+        renderer->commandList->CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
+
+        // Transition height map to SRV and shadow depth back to depth write
+        copyBarriers[0].Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_SOURCE;
+        copyBarriers[0].Transition.StateAfter = D3D12_RESOURCE_STATE_DEPTH_WRITE;
+        copyBarriers[1].Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
+        copyBarriers[1].Transition.StateAfter = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+
+        renderer->commandList->ResourceBarrier(2, copyBarriers);
+
+        // Set compute pipeline
+        renderer->commandList->SetComputeRootSignature(renderer->horizonComputeRootSig.Get());
+        renderer->commandList->SetPipelineState(renderer->horizonComputePSO.Get());
+
+        // Set descriptor heaps
+        ID3D12DescriptorHeap* horizonHeaps[] = { renderer->horizonSrvUavHeap.Get() };
+        renderer->commandList->SetDescriptorHeaps(1, horizonHeaps);
+
+        // Set height map SRV (descriptor 0)
+        D3D12_GPU_DESCRIPTOR_HANDLE srvHandle = renderer->horizonSrvUavHeap->GetGPUDescriptorHandleForHeapStart();
+        renderer->commandList->SetComputeRootDescriptorTable(1, srvHandle);
+
+        // Set horizon maps UAV (descriptor 1)
+        UINT descriptorSize = renderer->device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+        D3D12_GPU_DESCRIPTOR_HANDLE uavHandle = srvHandle;
+        uavHandle.ptr += descriptorSize;
+        renderer->commandList->SetComputeRootDescriptorTable(2, uavHandle);
+
+        // Dispatch compute for each light
+        UINT dispatchX = (D3D12Renderer::HORIZON_MAP_SIZE + 15) / 16;
+        UINT dispatchY = (D3D12Renderer::HORIZON_MAP_SIZE + 15) / 16;
+
+        struct HorizonParams {
+            float lightPosX, lightPosY, lightPosZ;
+            float worldSize;
+            float worldMinX, worldMinY, worldMinZ;
+            uint32_t lightIndex;
+            uint32_t mapSize;
+            float nearPlaneY;    // World Y at depth=0
+            float farPlaneY;     // World Y at depth=1
+            float padding;
+        };
+
+        // Calculate world Y values at depth buffer extremes
+        // Top-down camera is at viewHeight looking down with near=0.1, far=viewHeight+10
+        float viewHeight = renderer->carAABB.max.y + 50.0f;
+        float nearZ = 0.1f;
+        float farZ = viewHeight + 10.0f;
+        float nearPlaneY = viewHeight - nearZ;   // World Y at depth=0 (near plane)
+        float farPlaneY = viewHeight - farZ;     // World Y at depth=1 (far plane) = -10
+
+        for (uint32_t i = 0; i < lightCount; ++i)
+        {
+            const ConeLight& light = renderer->coneLights[i];
+
+            HorizonParams params = {};
+            params.lightPosX = light.position.x;
+            params.lightPosY = light.position.y;
+            params.lightPosZ = light.position.z;
+            params.worldSize = renderer->horizonWorldSize;
+            params.worldMinX = renderer->horizonWorldMin.x;
+            params.worldMinY = renderer->horizonWorldMin.y;
+            params.worldMinZ = renderer->horizonWorldMin.z;
+            params.lightIndex = i;
+            params.mapSize = D3D12Renderer::HORIZON_MAP_SIZE;
+            params.nearPlaneY = nearPlaneY;
+            params.farPlaneY = farPlaneY;
+
+            renderer->commandList->SetComputeRoot32BitConstants(0, 12, &params, 0);
+            renderer->commandList->Dispatch(dispatchX, dispatchY, 1);
+        }
+
+        // Transition horizon maps from UAV to SRV for pixel shader
+        D3D12_RESOURCE_BARRIER horizonBarrier = {};
+        horizonBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        horizonBarrier.Transition.pResource = renderer->horizonMaps.Get();
+        horizonBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+        horizonBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+        horizonBarrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+        renderer->commandList->ResourceBarrier(1, &horizonBarrier);
+    }
+
     // ========== Main Render Pass ==========
     // Transition cone shadow maps from depth write to shader resource
     D3D12_RESOURCE_BARRIER coneShadowBarrier = {};
@@ -2076,6 +2561,12 @@ void D3D12_Render(D3D12Renderer* renderer)
     renderer->commandList->SetGraphicsRootShaderResourceView(1, renderer->coneLightsBuffer[renderer->frameIndex]->GetGPUVirtualAddress());
     renderer->commandList->SetGraphicsRootShaderResourceView(2, renderer->coneLightMatricesBuffer[renderer->frameIndex]->GetGPUVirtualAddress());
     renderer->commandList->SetGraphicsRootDescriptorTable(3, renderer->coneShadowSrvHeap->GetGPUDescriptorHandleForHeapStart());
+
+    // Bind horizon maps (descriptor 1 in the same heap)
+    UINT srvDescriptorSize = renderer->device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    D3D12_GPU_DESCRIPTOR_HANDLE horizonSrvHandle = renderer->coneShadowSrvHeap->GetGPUDescriptorHandleForHeapStart();
+    horizonSrvHandle.ptr += srvDescriptorSize;
+    renderer->commandList->SetGraphicsRootDescriptorTable(5, horizonSrvHandle);
 
     // Transition render target
     D3D12_RESOURCE_BARRIER barrier = {};
@@ -2156,6 +2647,18 @@ void D3D12_Render(D3D12Renderer* renderer)
     coneShadowBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
     coneShadowBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_DEPTH_WRITE;
     renderer->commandList->ResourceBarrier(1, &coneShadowBarrier);
+
+    // Transition horizon maps back to UAV for next frame (if horizon mapping was used)
+    if (renderer->useHorizonMapping)
+    {
+        D3D12_RESOURCE_BARRIER horizonBarrier = {};
+        horizonBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        horizonBarrier.Transition.pResource = renderer->horizonMaps.Get();
+        horizonBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+        horizonBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+        horizonBarrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+        renderer->commandList->ResourceBarrier(1, &horizonBarrier);
+    }
 
     // Transition to present
     barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;

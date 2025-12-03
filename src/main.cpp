@@ -250,6 +250,7 @@ static void DrawImGui(float deltaTime)
     ImGui::SliderFloat("Headlight Falloff", &g_Renderer.headlightFalloff, 0.0f, 4.0f);
     ImGui::SliderFloat("Shadow Bias", &g_Renderer.shadowBias, -0.5f, 0.5f);
     ImGui::Checkbox("Disable Shadows", &g_Renderer.disableShadows);
+    ImGui::Checkbox("Use Horizon Mapping", &g_Renderer.useHorizonMapping);
 
     ImGui::Separator();
     ImGui::Text("Animation");

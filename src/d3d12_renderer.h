@@ -58,7 +58,10 @@ struct CameraConstants
     float debugLightOverlap;  // 1.0 = show light overlap visualization
     float overlapMaxCount;    // Max count for heat map coloring
     float disableShadows;     // 1.0 = skip shadow map sampling
-    float padding[1];         // Align to 16 bytes
+    float useHorizonMapping;  // 1.0 = use horizon mapping instead of shadow maps
+    float horizonWorldMinX;   // Horizon map world space bounds
+    float horizonWorldMinZ;
+    float horizonWorldSize;
 };
 
 struct AABB
@@ -189,6 +192,18 @@ struct D3D12Renderer
     // Per-light view-projection matrices (uploaded to GPU)
     ComPtr<ID3D12Resource>          coneLightMatricesBuffer[FRAME_COUNT];
     Mat4*                           coneLightMatricesMapped[FRAME_COUNT];
+
+    // Horizon Mapping shadow technique
+    bool useHorizonMapping = false;
+    static constexpr uint32_t HORIZON_MAP_SIZE = 1024;
+    ComPtr<ID3D12Resource>          horizonHeightMap;          // R32_FLOAT top-down height map
+    ComPtr<ID3D12Resource>          horizonMaps;               // Texture2DArray R32_FLOAT per-light horizon angles
+    ComPtr<ID3D12DescriptorHeap>    horizonSrvUavHeap;         // SRV+UAV heap for compute
+    ComPtr<ID3D12RootSignature>     horizonComputeRootSig;     // Root signature for horizon compute
+    ComPtr<ID3D12PipelineState>     horizonComputePSO;         // Compute pipeline for horizon tracing
+    ComPtr<ID3D12Resource>          horizonParamsBuffer;       // Per-light parameters for compute
+    float                           horizonWorldSize = 0.0f;   // World space size covered by horizon map
+    Vec3                            horizonWorldMin;           // World space min corner of horizon map
 };
 
 bool D3D12_Init(D3D12Renderer* renderer, HWND hwnd, uint32_t width, uint32_t height);
