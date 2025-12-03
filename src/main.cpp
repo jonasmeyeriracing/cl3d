@@ -597,6 +597,18 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             CaptureMouse(true);
         return 0;
 
+    case WM_MOUSEWHEEL:
+        {
+            // Adjust camera speed with mouse wheel
+            short delta = GET_WHEEL_DELTA_WPARAM(wParam);
+            float multiplier = (delta > 0) ? 1.2f : (1.0f / 1.2f);
+            g_Renderer.camera.moveSpeed *= multiplier;
+            // Clamp to reasonable range
+            if (g_Renderer.camera.moveSpeed < 1.0f) g_Renderer.camera.moveSpeed = 1.0f;
+            if (g_Renderer.camera.moveSpeed > 10000.0f) g_Renderer.camera.moveSpeed = 10000.0f;
+        }
+        return 0;
+
     case WM_KILLFOCUS:
         // Release mouse when window loses focus
         if (g_MouseCaptured)
