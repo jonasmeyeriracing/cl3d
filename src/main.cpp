@@ -520,8 +520,11 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             SaveStateToFile(g_Renderer, filename);
         }
 
-        // Alt+1..9: Load bookmark from 1.cfg..9.cfg
-        if (wParam >= '1' && wParam <= '9' && (GetKeyState(VK_MENU) & 0x8000))
+        // 1..9: Load bookmark from 1.cfg..9.cfg (without modifiers)
+        if (wParam >= '1' && wParam <= '9' &&
+            !(GetKeyState(VK_CONTROL) & 0x8000) &&
+            !(GetKeyState(VK_MENU) & 0x8000) &&
+            !(GetKeyState(VK_SHIFT) & 0x8000))
         {
             char filename[16];
             snprintf(filename, sizeof(filename), "%c.cfg", (char)wParam);
