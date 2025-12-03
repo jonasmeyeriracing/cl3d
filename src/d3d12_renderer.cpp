@@ -642,13 +642,14 @@ float CalculateHorizonShadow(float3 worldPos, float3 lightPos, int lightIndex)
     if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0)
         return 1.0;  // Outside horizon map, no shadow
 
-    // Sample the required height for the light to be visible at this position
+    // Sample required height using bilinear filtering
     float requiredHeight = horizonMaps.SampleLevel(linearSampler, float3(uv, lightIndex), 0);
 
-    // If the light's actual height is above the required height, it's visible (lit)
-    // Add small bias to reduce self-shadowing artifacts
+    // Soft shadow: smoothstep over a height range
     float bias = 0.1;
-    return (lightPos.y > requiredHeight + bias) ? 1.0 : 0.0;
+    float softness = 1.0;  // Height range for soft transition
+    float clearance = lightPos.y - (requiredHeight + bias);
+    return saturate(clearance / softness);
 }
 
 float3 CalculateConeLightContribution(float3 worldPos, float3 normal, ConeLight light, int lightIndex)
