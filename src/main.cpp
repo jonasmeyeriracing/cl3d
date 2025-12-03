@@ -296,7 +296,7 @@ static void UpdateCamera(float deltaTime)
     if (g_Keys['A']) moveDir += right * -1.0f;
     if (g_Keys['D']) moveDir += right;
     if (g_Keys['E'] || g_Keys[VK_SPACE]) moveDir += Vec3(0, 1, 0);
-    if (g_Keys['Q'] || g_Keys[VK_CONTROL]) moveDir += Vec3(0, -1, 0);
+    if (g_Keys['Q']) moveDir += Vec3(0, -1, 0);
 
     // Normalize and apply speed
     float len = moveDir.length();
