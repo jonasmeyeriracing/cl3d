@@ -741,16 +741,19 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow)
             // Update car animation
             D3D12_Update(&g_Renderer, deltaTime);
 
-            // Start ImGui frame
-            ImGui_ImplDX12_NewFrame();
-            ImGui_ImplWin32_NewFrame();
-            ImGui::NewFrame();
+            // Start ImGui frame (skip in test mode)
+            if (!g_TestMode)
+            {
+                ImGui_ImplDX12_NewFrame();
+                ImGui_ImplWin32_NewFrame();
+                ImGui::NewFrame();
 
-            // Draw ImGui UI
-            DrawImGui(deltaTime);
+                // Draw ImGui UI
+                DrawImGui(deltaTime);
 
-            // Render ImGui
-            ImGui::Render();
+                // Render ImGui
+                ImGui::Render();
+            }
 
             // Render scene + ImGui
             D3D12_Render(&g_Renderer);

@@ -2639,10 +2639,14 @@ void D3D12_Render(D3D12Renderer* renderer)
         }
     }
 
-    // Render ImGui
-    ID3D12DescriptorHeap* descriptorHeaps[] = { renderer->imguiSrvHeap.Get() };
-    renderer->commandList->SetDescriptorHeaps(1, descriptorHeaps);
-    ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), renderer->commandList.Get());
+    // Render ImGui (if there's draw data)
+    ImDrawData* imguiDrawData = ImGui::GetDrawData();
+    if (imguiDrawData)
+    {
+        ID3D12DescriptorHeap* descriptorHeaps[] = { renderer->imguiSrvHeap.Get() };
+        renderer->commandList->SetDescriptorHeaps(1, descriptorHeaps);
+        ImGui_ImplDX12_RenderDrawData(imguiDrawData, renderer->commandList.Get());
+    }
 
     // Transition cone shadow maps back to depth write for next frame
     coneShadowBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
