@@ -2792,13 +2792,22 @@ bool D3D12_CaptureBackbuffer(D3D12Renderer* renderer, uint8_t** outPixels, uint3
     if (FAILED(hr))
         return false;
 
-    // Allocate output buffer (BGRA format)
+    // Allocate output buffer (BGRA format for TGA)
     uint8_t* pixels = new uint8_t[width * height * 4];
 
-    // Copy row by row (handle row pitch)
+    // Copy row by row (handle row pitch) and swap R/B channels
+    // D3D12 backbuffer is RGBA, TGA expects BGRA
     for (uint32_t y = 0; y < height; y++)
     {
-        memcpy(pixels + y * width * 4, mappedData + y * footprint.Footprint.RowPitch, width * 4);
+        uint8_t* srcRow = mappedData + y * footprint.Footprint.RowPitch;
+        uint8_t* dstRow = pixels + y * width * 4;
+        for (uint32_t x = 0; x < width; x++)
+        {
+            dstRow[x * 4 + 0] = srcRow[x * 4 + 2];  // B <- R
+            dstRow[x * 4 + 1] = srcRow[x * 4 + 1];  // G <- G
+            dstRow[x * 4 + 2] = srcRow[x * 4 + 0];  // R <- B
+            dstRow[x * 4 + 3] = srcRow[x * 4 + 3];  // A <- A
+        }
     }
 
     readbackBuffer->Unmap(0, nullptr);
