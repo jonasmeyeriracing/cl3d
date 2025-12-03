@@ -4,6 +4,10 @@
 #include "imgui_impl_dx12.h"
 #include <cstdio>
 #include <cmath>
+#include <string>
+#include <sstream>
+#include <iomanip>
+#include <fstream>
 
 // Forward declare message handler from imgui_impl_win32.cpp
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -25,6 +29,141 @@ static LARGE_INTEGER g_LastTime = {};
 static constexpr int FRAME_TIME_HISTORY_SIZE = 200;
 static float g_FrameTimeHistory[FRAME_TIME_HISTORY_SIZE] = {};
 static int g_FrameTimeIndex = 0;
+
+// Serialize all settings to a string
+static std::string SerializeState(const D3D12Renderer& renderer)
+{
+    std::ostringstream ss;
+    ss << std::setprecision(8);
+
+    // Version for future compatibility
+    ss << "version=1\n";
+
+    // Camera position and orientation
+    ss << "camera.position.x=" << renderer.camera.position.x << "\n";
+    ss << "camera.position.y=" << renderer.camera.position.y << "\n";
+    ss << "camera.position.z=" << renderer.camera.position.z << "\n";
+    ss << "camera.yaw=" << renderer.camera.yaw << "\n";
+    ss << "camera.pitch=" << renderer.camera.pitch << "\n";
+
+    // Lighting settings
+    ss << "ambientIntensity=" << renderer.ambientIntensity << "\n";
+    ss << "coneLightIntensity=" << renderer.coneLightIntensity << "\n";
+    ss << "headlightRange=" << renderer.headlightRange << "\n";
+    ss << "headlightFalloff=" << renderer.headlightFalloff << "\n";
+    ss << "shadowBias=" << renderer.shadowBias << "\n";
+    ss << "disableShadows=" << (renderer.disableShadows ? 1 : 0) << "\n";
+    ss << "useHorizonMapping=" << (renderer.useHorizonMapping ? 1 : 0) << "\n";
+
+    // Animation settings
+    ss << "carSpeed=" << renderer.carSpeed << "\n";
+    ss << "carSpacing=" << renderer.carSpacing << "\n";
+
+    // Debug settings
+    ss << "showDebugLights=" << (renderer.showDebugLights ? 1 : 0) << "\n";
+    ss << "showLightOverlap=" << (renderer.showLightOverlap ? 1 : 0) << "\n";
+    ss << "overlapMaxCount=" << renderer.overlapMaxCount << "\n";
+    ss << "activeLightCount=" << renderer.activeLightCount << "\n";
+    ss << "showShadowMapDebug=" << (renderer.showShadowMapDebug ? 1 : 0) << "\n";
+    ss << "debugShadowMapIndex=" << renderer.debugShadowMapIndex << "\n";
+
+    // Simulation time (first car's track progress as reference)
+    ss << "simulationTime=" << renderer.carTrackProgress[0] << "\n";
+
+    return ss.str();
+}
+
+// Deserialize settings from a string
+static bool DeserializeState(D3D12Renderer& renderer, const std::string& data)
+{
+    std::istringstream ss(data);
+    std::string line;
+
+    float simulationTime = -1.0f;
+    float oldSimTime = renderer.carTrackProgress[0];
+
+    while (std::getline(ss, line))
+    {
+        if (line.empty() || line[0] == '#')
+            continue;
+
+        size_t eqPos = line.find('=');
+        if (eqPos == std::string::npos)
+            continue;
+
+        std::string key = line.substr(0, eqPos);
+        std::string value = line.substr(eqPos + 1);
+
+        // Camera
+        if (key == "camera.position.x") renderer.camera.position.x = std::stof(value);
+        else if (key == "camera.position.y") renderer.camera.position.y = std::stof(value);
+        else if (key == "camera.position.z") renderer.camera.position.z = std::stof(value);
+        else if (key == "camera.yaw") renderer.camera.yaw = std::stof(value);
+        else if (key == "camera.pitch") renderer.camera.pitch = std::stof(value);
+
+        // Lighting
+        else if (key == "ambientIntensity") renderer.ambientIntensity = std::stof(value);
+        else if (key == "coneLightIntensity") renderer.coneLightIntensity = std::stof(value);
+        else if (key == "headlightRange") renderer.headlightRange = std::stof(value);
+        else if (key == "headlightFalloff") renderer.headlightFalloff = std::stof(value);
+        else if (key == "shadowBias") renderer.shadowBias = std::stof(value);
+        else if (key == "disableShadows") renderer.disableShadows = (std::stoi(value) != 0);
+        else if (key == "useHorizonMapping") renderer.useHorizonMapping = (std::stoi(value) != 0);
+
+        // Animation
+        else if (key == "carSpeed") renderer.carSpeed = std::stof(value);
+        else if (key == "carSpacing") renderer.carSpacing = std::stof(value);
+
+        // Debug
+        else if (key == "showDebugLights") renderer.showDebugLights = (std::stoi(value) != 0);
+        else if (key == "showLightOverlap") renderer.showLightOverlap = (std::stoi(value) != 0);
+        else if (key == "overlapMaxCount") renderer.overlapMaxCount = std::stof(value);
+        else if (key == "activeLightCount") renderer.activeLightCount = std::stoi(value);
+        else if (key == "showShadowMapDebug") renderer.showShadowMapDebug = (std::stoi(value) != 0);
+        else if (key == "debugShadowMapIndex") renderer.debugShadowMapIndex = std::stoi(value);
+
+        // Simulation time
+        else if (key == "simulationTime") simulationTime = std::stof(value);
+    }
+
+    // Apply simulation time delta to all cars
+    if (simulationTime >= 0.0f)
+    {
+        float delta = simulationTime - oldSimTime;
+        for (uint32_t i = 0; i < renderer.numCars; i++)
+        {
+            renderer.carTrackProgress[i] += delta;
+            // Wrap to [0, 1)
+            while (renderer.carTrackProgress[i] >= 1.0f)
+                renderer.carTrackProgress[i] -= 1.0f;
+            while (renderer.carTrackProgress[i] < 0.0f)
+                renderer.carTrackProgress[i] += 1.0f;
+        }
+    }
+
+    return true;
+}
+
+// Save state to a file
+static bool SaveStateToFile(const D3D12Renderer& renderer, const char* filename)
+{
+    std::ofstream file(filename);
+    if (!file.is_open())
+        return false;
+    file << SerializeState(renderer);
+    return true;
+}
+
+// Load state from a file
+static bool LoadStateFromFile(D3D12Renderer& renderer, const char* filename)
+{
+    std::ifstream file(filename);
+    if (!file.is_open())
+        return false;
+    std::stringstream buffer;
+    buffer << file.rdbuf();
+    return DeserializeState(renderer, buffer.str());
+}
 
 static float GetDeltaTime()
 {
