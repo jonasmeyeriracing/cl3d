@@ -642,14 +642,26 @@ float CalculateHorizonShadow(float3 worldPos, float3 lightPos, int lightIndex)
     if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0)
         return 1.0;  // Outside horizon map, no shadow
 
+    // Use screen-space derivatives to compute adaptive softness
+    // This accounts for perspective foreshortening
+    float2 uvDdx = ddx(uv);
+    float2 uvDdy = ddy(uv);
+    float pixelFootprint = max(length(uvDdx), length(uvDdy));
+
+    // Scale softness based on how many texels we're covering per screen pixel
+    // More texels per pixel = we're viewing at a glancing angle = need more softness
+    float texelSize = 1.0 / 1024.0;
+    float texelsPerPixel = pixelFootprint / texelSize;
+
     // Sample required height using bilinear filtering
     float requiredHeight = horizonMaps.SampleLevel(linearSampler, float3(uv, lightIndex), 0);
 
-    // Soft shadow: smoothstep over a height range
+    // Adaptive softness: base softness + extra based on texel coverage
     float bias = 0.1;
-    float softness = 1.0;  // Height range for soft transition
+    float baseSoftness = 0.5;
+    float adaptiveSoftness = baseSoftness + texelsPerPixel * 0.3;
     float clearance = lightPos.y - (requiredHeight + bias);
-    return saturate(clearance / softness);
+    return saturate(clearance / adaptiveSoftness);
 }
 
 float3 CalculateConeLightContribution(float3 worldPos, float3 normal, ConeLight light, int lightIndex)
