@@ -212,3 +212,4 @@ void D3D12_Update(D3D12Renderer* renderer, float deltaTime);
 void D3D12_Render(D3D12Renderer* renderer);
 void D3D12_WaitForGpu(D3D12Renderer* renderer);
 void D3D12_Resize(D3D12Renderer* renderer, uint32_t width, uint32_t height);
+bool D3D12_CaptureBackbuffer(D3D12Renderer* renderer, uint8_t** outPixels, uint32_t* outWidth, uint32_t* outHeight);

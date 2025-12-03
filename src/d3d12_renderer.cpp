@@ -2712,3 +2712,100 @@ void D3D12_Resize(D3D12Renderer* renderer, uint32_t width, uint32_t height)
     // Recreate depth buffer
     CreateDepthBuffer(renderer);
 }
+
+bool D3D12_CaptureBackbuffer(D3D12Renderer* renderer, uint8_t** outPixels, uint32_t* outWidth, uint32_t* outHeight)
+{
+    D3D12_WaitForGpu(renderer);
+
+    ID3D12Resource* backBuffer = renderer->renderTargets[renderer->frameIndex].Get();
+
+    D3D12_RESOURCE_DESC desc = backBuffer->GetDesc();
+    uint32_t width = (uint32_t)desc.Width;
+    uint32_t height = (uint32_t)desc.Height;
+
+    // Get the footprint for the readback buffer
+    D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint = {};
+    UINT64 totalBytes = 0;
+    renderer->device->GetCopyableFootprints(&desc, 0, 1, 0, &footprint, nullptr, nullptr, &totalBytes);
+
+    // Create a readback buffer
+    D3D12_HEAP_PROPERTIES heapProps = {};
+    heapProps.Type = D3D12_HEAP_TYPE_READBACK;
+
+    D3D12_RESOURCE_DESC bufferDesc = {};
+    bufferDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    bufferDesc.Width = totalBytes;
+    bufferDesc.Height = 1;
+    bufferDesc.DepthOrArraySize = 1;
+    bufferDesc.MipLevels = 1;
+    bufferDesc.SampleDesc.Count = 1;
+    bufferDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+
+    ComPtr<ID3D12Resource> readbackBuffer;
+    HRESULT hr = renderer->device->CreateCommittedResource(
+        &heapProps, D3D12_HEAP_FLAG_NONE, &bufferDesc,
+        D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&readbackBuffer));
+    if (FAILED(hr))
+        return false;
+
+    // Reset command allocator and command list
+    renderer->commandAllocators[renderer->frameIndex]->Reset();
+    renderer->commandList->Reset(renderer->commandAllocators[renderer->frameIndex].Get(), nullptr);
+
+    // Transition backbuffer to copy source
+    D3D12_RESOURCE_BARRIER barrier = {};
+    barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    barrier.Transition.pResource = backBuffer;
+    barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
+    barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
+    barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    renderer->commandList->ResourceBarrier(1, &barrier);
+
+    // Copy texture to buffer
+    D3D12_TEXTURE_COPY_LOCATION srcLoc = {};
+    srcLoc.pResource = backBuffer;
+    srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    srcLoc.SubresourceIndex = 0;
+
+    D3D12_TEXTURE_COPY_LOCATION dstLoc = {};
+    dstLoc.pResource = readbackBuffer.Get();
+    dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+    dstLoc.PlacedFootprint = footprint;
+
+    renderer->commandList->CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
+
+    // Transition backbuffer back to present
+    barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_SOURCE;
+    barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
+    renderer->commandList->ResourceBarrier(1, &barrier);
+
+    // Execute and wait
+    renderer->commandList->Close();
+    ID3D12CommandList* cmdLists[] = { renderer->commandList.Get() };
+    renderer->commandQueue->ExecuteCommandLists(1, cmdLists);
+
+    D3D12_WaitForGpu(renderer);
+
+    // Map and copy data
+    uint8_t* mappedData = nullptr;
+    hr = readbackBuffer->Map(0, nullptr, (void**)&mappedData);
+    if (FAILED(hr))
+        return false;
+
+    // Allocate output buffer (BGRA format)
+    uint8_t* pixels = new uint8_t[width * height * 4];
+
+    // Copy row by row (handle row pitch)
+    for (uint32_t y = 0; y < height; y++)
+    {
+        memcpy(pixels + y * width * 4, mappedData + y * footprint.Footprint.RowPitch, width * 4);
+    }
+
+    readbackBuffer->Unmap(0, nullptr);
+
+    *outPixels = pixels;
+    *outWidth = width;
+    *outHeight = height;
+
+    return true;
+}

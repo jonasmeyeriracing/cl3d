@@ -31,6 +31,13 @@ static constexpr int FRAME_TIME_HISTORY_SIZE = 200;
 static float g_FrameTimeHistory[FRAME_TIME_HISTORY_SIZE] = {};
 static int g_FrameTimeIndex = 0;
 
+// Test mode
+static bool g_TestMode = false;
+static std::string g_TestConfigFile;
+static std::string g_TestOutputFile;
+static int g_TestFrameCount = 0;
+static constexpr int TEST_FRAME_WAIT = 30;
+
 // Serialize all settings to a string
 static std::string SerializeState(const D3D12Renderer& renderer)
 {
@@ -217,6 +224,53 @@ static bool PasteStateFromClipboard(HWND hwnd, D3D12Renderer& renderer)
     CloseClipboard();
 
     return DeserializeState(renderer, state);
+}
+
+// Write TGA file (uncompressed, 32-bit BGRA)
+static bool WriteTGA(const char* filename, uint32_t width, uint32_t height, const uint8_t* pixels)
+{
+    std::ofstream file(filename, std::ios::binary);
+    if (!file.is_open())
+        return false;
+
+    // TGA header
+    uint8_t header[18] = {};
+    header[2] = 2;  // Uncompressed true-color
+    header[12] = width & 0xFF;
+    header[13] = (width >> 8) & 0xFF;
+    header[14] = height & 0xFF;
+    header[15] = (height >> 8) & 0xFF;
+    header[16] = 32;  // 32 bits per pixel
+    header[17] = 0x20;  // Top-left origin
+
+    file.write((char*)header, sizeof(header));
+    file.write((char*)pixels, width * height * 4);
+
+    return true;
+}
+
+// Generate output filename from config filename
+// "config.cfg" -> "config_test_out.tga"
+static std::string GenerateTestOutputFilename(const std::string& configFile)
+{
+    std::string result = configFile;
+
+    // Remove .cfg extension if present
+    size_t dotPos = result.rfind(".cfg");
+    if (dotPos != std::string::npos && dotPos == result.length() - 4)
+    {
+        result = result.substr(0, dotPos);
+    }
+
+    // Also remove path, keep just the filename
+    size_t slashPos = result.rfind('/');
+    size_t backslashPos = result.rfind('\\');
+    size_t pathEnd = 0;
+    if (slashPos != std::string::npos) pathEnd = slashPos + 1;
+    if (backslashPos != std::string::npos && backslashPos >= pathEnd) pathEnd = backslashPos + 1;
+    if (pathEnd > 0) result = result.substr(pathEnd);
+
+    return result + "_test_out.tga";
 }
 
 static float GetDeltaTime()
@@ -616,7 +670,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow)
         return 1;
     }
 
-    // Parse command line for .cfg file to load
+    // Parse command line for .cfg file to load or -test mode
     int argc = 0;
     LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     if (argv)
@@ -627,16 +681,36 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow)
             int len = WideCharToMultiByte(CP_UTF8, 0, argv[i], -1, nullptr, 0, nullptr, nullptr);
             if (len > 0)
             {
-                char* filename = new char[len];
-                WideCharToMultiByte(CP_UTF8, 0, argv[i], -1, filename, len, nullptr, nullptr);
+                char* arg = new char[len];
+                WideCharToMultiByte(CP_UTF8, 0, argv[i], -1, arg, len, nullptr, nullptr);
 
-                // Check if it's a .cfg file
-                size_t argLen = strlen(filename);
-                if (argLen > 4 && strcmp(filename + argLen - 4, ".cfg") == 0)
+                // Check for -test flag
+                if (strcmp(arg, "-test") == 0 && i + 1 < argc)
                 {
-                    LoadStateFromFile(g_Renderer, filename);
+                    g_TestMode = true;
+                    // Get the next argument as config file
+                    int cfgLen = WideCharToMultiByte(CP_UTF8, 0, argv[i + 1], -1, nullptr, 0, nullptr, nullptr);
+                    if (cfgLen > 0)
+                    {
+                        char* cfgFile = new char[cfgLen];
+                        WideCharToMultiByte(CP_UTF8, 0, argv[i + 1], -1, cfgFile, cfgLen, nullptr, nullptr);
+                        g_TestConfigFile = cfgFile;
+                        g_TestOutputFile = GenerateTestOutputFilename(g_TestConfigFile);
+                        LoadStateFromFile(g_Renderer, cfgFile);
+                        delete[] cfgFile;
+                    }
+                    i++;  // Skip next argument
                 }
-                delete[] filename;
+                // Check if it's a .cfg file (for non-test loading)
+                else
+                {
+                    size_t argLen = strlen(arg);
+                    if (argLen > 4 && strcmp(arg + argLen - 4, ".cfg") == 0)
+                    {
+                        LoadStateFromFile(g_Renderer, arg);
+                    }
+                }
+                delete[] arg;
             }
         }
         LocalFree(argv);
@@ -680,6 +754,25 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow)
 
             // Render scene + ImGui
             D3D12_Render(&g_Renderer);
+
+            // Test mode: capture backbuffer after N frames and exit
+            if (g_TestMode)
+            {
+                g_TestFrameCount++;
+                if (g_TestFrameCount >= TEST_FRAME_WAIT)
+                {
+                    uint8_t* pixels = nullptr;
+                    uint32_t width = 0, height = 0;
+
+                    if (D3D12_CaptureBackbuffer(&g_Renderer, &pixels, &width, &height))
+                    {
+                        WriteTGA(g_TestOutputFile.c_str(), width, height, pixels);
+                        delete[] pixels;
+                    }
+
+                    g_Running = false;
+                }
+            }
         }
     }
 
