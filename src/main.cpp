@@ -8,6 +8,7 @@
 #include <sstream>
 #include <iomanip>
 #include <fstream>
+#include <shellapi.h>
 
 // Forward declare message handler from imgui_impl_win32.cpp
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -163,6 +164,59 @@ static bool LoadStateFromFile(D3D12Renderer& renderer, const char* filename)
     std::stringstream buffer;
     buffer << file.rdbuf();
     return DeserializeState(renderer, buffer.str());
+}
+
+// Copy state to clipboard
+static bool CopyStateToClipboard(HWND hwnd, const D3D12Renderer& renderer)
+{
+    std::string state = SerializeState(renderer);
+
+    if (!OpenClipboard(hwnd))
+        return false;
+
+    EmptyClipboard();
+
+    HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, state.size() + 1);
+    if (!hMem)
+    {
+        CloseClipboard();
+        return false;
+    }
+
+    char* pMem = (char*)GlobalLock(hMem);
+    memcpy(pMem, state.c_str(), state.size() + 1);
+    GlobalUnlock(hMem);
+
+    SetClipboardData(CF_TEXT, hMem);
+    CloseClipboard();
+    return true;
+}
+
+// Paste state from clipboard
+static bool PasteStateFromClipboard(HWND hwnd, D3D12Renderer& renderer)
+{
+    if (!OpenClipboard(hwnd))
+        return false;
+
+    HANDLE hData = GetClipboardData(CF_TEXT);
+    if (!hData)
+    {
+        CloseClipboard();
+        return false;
+    }
+
+    char* pData = (char*)GlobalLock(hData);
+    if (!pData)
+    {
+        CloseClipboard();
+        return false;
+    }
+
+    std::string state(pData);
+    GlobalUnlock(hData);
+    CloseClipboard();
+
+    return DeserializeState(renderer, state);
 }
 
 static float GetDeltaTime()
@@ -445,6 +499,34 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             else
                 g_Running = false;
         }
+
+        // Ctrl+C: Copy state to clipboard
+        if (wParam == 'C' && (GetKeyState(VK_CONTROL) & 0x8000))
+        {
+            CopyStateToClipboard(hwnd, g_Renderer);
+        }
+
+        // Ctrl+V: Paste state from clipboard
+        if (wParam == 'V' && (GetKeyState(VK_CONTROL) & 0x8000))
+        {
+            PasteStateFromClipboard(hwnd, g_Renderer);
+        }
+
+        // Ctrl+1..9: Save bookmark to 1.cfg..9.cfg
+        if (wParam >= '1' && wParam <= '9' && (GetKeyState(VK_CONTROL) & 0x8000))
+        {
+            char filename[16];
+            snprintf(filename, sizeof(filename), "%c.cfg", (char)wParam);
+            SaveStateToFile(g_Renderer, filename);
+        }
+
+        // Alt+1..9: Load bookmark from 1.cfg..9.cfg
+        if (wParam >= '1' && wParam <= '9' && (GetKeyState(VK_MENU) & 0x8000))
+        {
+            char filename[16];
+            snprintf(filename, sizeof(filename), "%c.cfg", (char)wParam);
+            LoadStateFromFile(g_Renderer, filename);
+        }
         return 0;
 
     case WM_KEYUP:
@@ -529,6 +611,32 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow)
     {
         MessageBoxW(nullptr, L"Failed to initialize D3D12", L"Error", MB_OK | MB_ICONERROR);
         return 1;
+    }
+
+    // Parse command line for .cfg file to load
+    int argc = 0;
+    LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    if (argv)
+    {
+        for (int i = 1; i < argc; i++)
+        {
+            // Convert wide string to narrow string
+            int len = WideCharToMultiByte(CP_UTF8, 0, argv[i], -1, nullptr, 0, nullptr, nullptr);
+            if (len > 0)
+            {
+                char* filename = new char[len];
+                WideCharToMultiByte(CP_UTF8, 0, argv[i], -1, filename, len, nullptr, nullptr);
+
+                // Check if it's a .cfg file
+                size_t argLen = strlen(filename);
+                if (argLen > 4 && strcmp(filename + argLen - 4, ".cfg") == 0)
+                {
+                    LoadStateFromFile(g_Renderer, filename);
+                }
+                delete[] filename;
+            }
+        }
+        LocalFree(argv);
     }
 
     ShowWindow(g_Hwnd, nCmdShow);
