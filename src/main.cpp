@@ -251,8 +251,8 @@ static bool ExportToPBRT(const D3D12Renderer& renderer, const char* outputPath)
     file << "    \"integer yresolution\" [ 720 ]\n";
     file << "    \"string filename\" \"render.exr\"\n\n";
 
-    // Sampler for quality
-    file << "Sampler \"halton\" \"integer pixelsamples\" [ 64 ]\n\n";
+    // Sampler for quality - higher samples = less noise
+    file << "Sampler \"halton\" \"integer pixelsamples\" [ 256 ]\n\n";
 
     // Integrator - path tracing for realistic shadows
     file << "Integrator \"volpath\" \"integer maxdepth\" [ 5 ]\n\n";
@@ -962,8 +962,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow)
                     }
                     i++;  // Skip next argument
                 }
-                // Check for -generate-ref flag
-                else if (strcmp(arg, "-generate-ref") == 0 && i + 1 < argc)
+				// Check for -generate-ref flag
+				else if (strcmp(arg, "-generate-ref") == 0 && i + 1 < argc)
                 {
                     g_GenerateRefMode = true;
                     // Get the next argument as config file
