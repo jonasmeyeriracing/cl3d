@@ -10,8 +10,8 @@ Sampler "halton" "integer pixelsamples" [ 512 ]
 
 Integrator "volpath" "integer maxdepth" [ 1 ]
 
-LookAt -126.631 14.5857 33.099  # eye
-       -125.908 14.1133 33.6042  # look at
+LookAt -122.522 13.4788 34.1851  # eye
+       -121.914 12.8547 34.6754  # look at
        0 1 0  # up
 
 Camera "perspective"
@@ -1058,6 +1058,6 @@ AttributeBegin
         "point3 to" [ -106.172 0.6 38.5476 ]
         "float coneangle" [ 20 ]
         "float conedeltaangle" [ 5 ]
-        "rgb I" [ 1.19029e+07 1.11094e+07 9.52232e+06 ]
+        "rgb I" [ 1.35e+07 1.26e+07 1.08e+07 ]
 AttributeEnd
 

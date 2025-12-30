@@ -254,10 +254,10 @@ static bool ExportToPBRT(const D3D12Renderer& renderer, const char* outputPath)
     file << "    \"string filename\" \"render.exr\"\n\n";
 
     // Sampler for quality - higher samples = less noise
-    file << "Sampler \"halton\" \"integer pixelsamples\" [ 256 ]\n\n";
+    file << "Sampler \"halton\" \"integer pixelsamples\" [ 512 ]\n\n";
 
-    // Integrator - path tracing for realistic shadows
-    file << "Integrator \"volpath\" \"integer maxdepth\" [ 5 ]\n\n";
+    // Integrator - direct lighting only (maxdepth 1 = no bounces)
+    file << "Integrator \"volpath\" \"integer maxdepth\" [ 1 ]\n\n";
 
     // Camera - negate X to convert from D3D12 left-handed to PBRT right-handed
     const Camera& cam = renderer.camera;
@@ -274,16 +274,14 @@ static bool ExportToPBRT(const D3D12Renderer& renderer, const char* outputPath)
     // Begin world
     file << "WorldBegin\n\n";
 
-    // Sky dome with cl3d fog color (0.5, 0.6, 0.7)
-    // Use fog color directly - this is what appears at the horizon in cl3d
-    file << "# Sky/ambient lighting\n";
-    file << "LightSource \"infinite\"\n";
-    file << "    \"rgb L\" [ 0.5 0.6 0.7 ]\n\n";
+    // Very dim ambient for distant car visibility
+    file << "# Dim ambient light\n";
+    file << "LightSource \"infinite\" \"rgb L\" [ 0.02 0.02 0.02 ]\n\n";
 
-    // Ground plane material - darker to compensate for brighter sky light
+    // Ground plane - reflectance tuned so ambient gives ~0.09 appearance
     file << "# Ground plane\n";
     file << "AttributeBegin\n";
-    float groundReflectance = 0.05f;  // Dark ground to match cl3d appearance
+    float groundReflectance = 0.15f;  // With 0.15 ambient, gives ~0.03 which is dark enough
     file << "    Material \"diffuse\" \"rgb reflectance\" [ " << groundReflectance << " " << groundReflectance << " " << groundReflectance << " ]\n";
     file << "    Shape \"trianglemesh\"\n";
     file << "        \"point3 P\" [ -500 0 -500  500 0 -500  500 0 500  -500 0 500 ]\n";
@@ -340,7 +338,7 @@ static bool ExportToPBRT(const D3D12Renderer& renderer, const char* outputPath)
         carData[i].right = trackRight;
 
         file << "AttributeBegin\n";
-        file << "    Material \"diffuse\" \"rgb reflectance\" [ 0.8 0.8 0.8 ]\n";
+        file << "    Material \"diffuse\" \"rgb reflectance\" [ 0.3 0.3 0.3 ]\n";  // Low reflectance to reduce bounce noise
 
         // Transform: translate then rotate to align with track direction
         // Negate X for coordinate system conversion
@@ -384,7 +382,7 @@ static bool ExportToPBRT(const D3D12Renderer& renderer, const char* outputPath)
             Vec3 lightPos = frontPos + leftOffset;
             Vec3 lightTarget = lightPos + car.dir * 10.0f;
             float coneAngle = headlightOuterAngle * 180.0f / PI;
-            float power = renderer.coneLightIntensity * 500.0f;
+            float power = renderer.coneLightIntensity * renderer.headlightRange * renderer.headlightRange * 1.0f;
 
             file << "AttributeBegin\n";
             file << "    LightSource \"spot\"\n";
@@ -404,7 +402,7 @@ static bool ExportToPBRT(const D3D12Renderer& renderer, const char* outputPath)
             Vec3 lightPos = frontPos + rightOffset;
             Vec3 lightTarget = lightPos + car.dir * 10.0f;
             float coneAngle = headlightOuterAngle * 180.0f / PI;
-            float power = renderer.coneLightIntensity * 500.0f;
+            float power = renderer.coneLightIntensity * renderer.headlightRange * renderer.headlightRange * 1.0f;
 
             file << "AttributeBegin\n";
             file << "    LightSource \"spot\"\n";
