@@ -274,14 +274,16 @@ static bool ExportToPBRT(const D3D12Renderer& renderer, const char* outputPath)
     // Begin world
     file << "WorldBegin\n\n";
 
-    // Very dim ambient for distant car visibility
-    file << "# Dim ambient light\n";
-    file << "LightSource \"infinite\" \"rgb L\" [ 0.02 0.02 0.02 ]\n\n";
+    // Ambient light - scale down to avoid bright background (PBRT illuminates everything)
+    // cl3d ground ambient = 0.3 * 0.3 = 0.09, but we want darker background
+    float ambient = renderer.ambientIntensity * 0.2f;  // Scale down significantly
+    file << "# Ambient light (scaled from " << renderer.ambientIntensity << ")\n";
+    file << "LightSource \"infinite\" \"rgb L\" [ " << ambient << " " << ambient << " " << ambient << " ]\n\n";
 
-    // Ground plane - reflectance tuned so ambient gives ~0.09 appearance
+    // Ground plane - lower reflectance for darker ambient areas
     file << "# Ground plane\n";
     file << "AttributeBegin\n";
-    float groundReflectance = 0.15f;  // With 0.15 ambient, gives ~0.03 which is dark enough
+    float groundReflectance = 0.15f;  // Keep dark in unlit areas
     file << "    Material \"diffuse\" \"rgb reflectance\" [ " << groundReflectance << " " << groundReflectance << " " << groundReflectance << " ]\n";
     file << "    Shape \"trianglemesh\"\n";
     file << "        \"point3 P\" [ -500 0 -500  500 0 -500  500 0 500  -500 0 500 ]\n";
@@ -338,7 +340,7 @@ static bool ExportToPBRT(const D3D12Renderer& renderer, const char* outputPath)
         carData[i].right = trackRight;
 
         file << "AttributeBegin\n";
-        file << "    Material \"diffuse\" \"rgb reflectance\" [ 0.3 0.3 0.3 ]\n";  // Low reflectance to reduce bounce noise
+        file << "    Material \"diffuse\" \"rgb reflectance\" [ 0.8 0.8 0.8 ]\n";  // Match cl3d car color
 
         // Transform: translate then rotate to align with track direction
         // Negate X for coordinate system conversion
