@@ -3,8 +3,10 @@
 Test runner for cl3d PBRT export validation.
 
 Usage:
-  python test_runner.py generate  - Generate PBRT reference images (stored in test/)
-  python test_runner.py test      - Run cl3d and compare to reference images
+  python test_runner.py generate [filter]  - Generate PBRT reference images
+  python test_runner.py test [filter]      - Run cl3d and compare to references
+
+Optional filter argument runs only tests containing that string.
 """
 
 import argparse
@@ -135,7 +137,7 @@ def generate_reference(cfg_path, work_dir):
     return True
 
 
-def cmd_generate():
+def cmd_generate(filter_str=None):
     """Generate PBRT reference images for all tests."""
     print("=" * 60)
     print("Generating PBRT Reference Images")
@@ -154,11 +156,19 @@ def cmd_generate():
 
     # Find all .cfg files
     cfg_files = list(TEST_DIR.glob("*.cfg"))
+
+    # Filter by name if specified
+    if filter_str:
+        cfg_files = [f for f in cfg_files if filter_str in f.stem]
+
     if not cfg_files:
-        print(f"No .cfg files found in {TEST_DIR}")
+        if filter_str:
+            print(f"No .cfg files matching '{filter_str}' found in {TEST_DIR}")
+        else:
+            print(f"No .cfg files found in {TEST_DIR}")
         return 1
 
-    print(f"Found {len(cfg_files)} config(s)")
+    print(f"Found {len(cfg_files)} config(s)" + (f" matching '{filter_str}'" if filter_str else ""))
 
     # Create temp work directory
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -252,7 +262,7 @@ def run_test(cfg_path, output_dir):
         return None
 
 
-def cmd_test():
+def cmd_test(filter_str=None):
     """Run cl3d tests and compare to reference images."""
     print("=" * 60)
     print("cl3d Test Runner")
@@ -268,11 +278,19 @@ def cmd_test():
 
     # Find all .cfg files
     cfg_files = list(TEST_DIR.glob("*.cfg"))
+
+    # Filter by name if specified
+    if filter_str:
+        cfg_files = [f for f in cfg_files if filter_str in f.stem]
+
     if not cfg_files:
-        print(f"No .cfg files found in {TEST_DIR}")
+        if filter_str:
+            print(f"No .cfg files matching '{filter_str}' found in {TEST_DIR}")
+        else:
+            print(f"No .cfg files found in {TEST_DIR}")
         return 1
 
-    print(f"Found {len(cfg_files)} test(s)")
+    print(f"Found {len(cfg_files)} test(s)" + (f" matching '{filter_str}'" if filter_str else ""))
 
     # Create output directory with timestamp
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -329,8 +347,10 @@ Commands:
   test        Run cl3d and compare to reference images
 
 Examples:
-  python test_runner.py generate   # Generate reference images first
-  python test_runner.py test       # Then run tests against them
+  python test_runner.py generate              # Generate all reference images
+  python test_runner.py test                  # Run all tests
+  python test_runner.py test intensity        # Run only tests containing 'intensity'
+  python test_runner.py generate shadow       # Generate only tests containing 'shadow'
 """
     )
     parser.add_argument(
@@ -338,13 +358,19 @@ Examples:
         choices=["generate", "test"],
         help="Command to run"
     )
+    parser.add_argument(
+        "filter",
+        nargs="?",
+        default=None,
+        help="Optional filter string - only run tests containing this string"
+    )
 
     args = parser.parse_args()
 
     if args.command == "generate":
-        return cmd_generate()
+        return cmd_generate(args.filter)
     elif args.command == "test":
-        return cmd_test()
+        return cmd_test(args.filter)
     else:
         parser.print_help()
         return 1
