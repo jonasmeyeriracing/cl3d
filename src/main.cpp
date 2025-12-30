@@ -8,6 +8,7 @@
 #include <sstream>
 #include <iomanip>
 #include <fstream>
+#include <vector>
 #include <shellapi.h>
 
 // Forward declare message handler from imgui_impl_win32.cpp
@@ -37,6 +38,10 @@ static std::string g_TestConfigFile;
 static std::string g_TestOutputFile;
 static int g_TestFrameCount = 0;
 static constexpr int TEST_FRAME_WAIT = 30;
+
+// Generate reference mode
+static bool g_GenerateRefMode = false;
+static std::string g_GenerateRefConfigFile;
 
 // Serialize all settings to a string
 static std::string SerializeState(const D3D12Renderer& renderer)
@@ -171,6 +176,250 @@ static bool LoadStateFromFile(D3D12Renderer& renderer, const char* filename)
     std::stringstream buffer;
     buffer << file.rdbuf();
     return DeserializeState(renderer, buffer.str());
+}
+
+// Helper function to get position and direction on the oval track
+// Must match the implementation in d3d12_renderer.cpp exactly!
+static void GetTrackPositionAndDirection(float progress, float straightLength, float radius,
+                                          Vec3& outPos, Vec3& outDir)
+{
+    const float PI = 3.14159265f;
+
+    // Track layout (counterclockwise):
+    // - Bottom straight: progress 0 to ~0.25 (going +X)
+    // - Right semicircle: progress ~0.25 to ~0.5 (turning around)
+    // - Top straight: progress ~0.5 to ~0.75 (going -X)
+    // - Left semicircle: progress ~0.75 to 1.0 (turning around)
+
+    float totalStraight = straightLength * 2.0f;
+    float totalCurve = 2.0f * PI * radius;
+    float totalLength = totalStraight + totalCurve;
+
+    float straightFraction = totalStraight / totalLength;
+    float curveFraction = totalCurve / totalLength;
+    float singleStraightFrac = straightFraction * 0.5f;
+    float singleCurveFrac = curveFraction * 0.5f;
+
+    float halfStraight = straightLength * 0.5f;
+
+    if (progress < singleStraightFrac)
+    {
+        // Bottom straight (going +X direction)
+        float t = progress / singleStraightFrac;
+        outPos = Vec3(-halfStraight + t * straightLength, 0, -radius);
+        outDir = Vec3(1, 0, 0);
+    }
+    else if (progress < singleStraightFrac + singleCurveFrac)
+    {
+        // Right semicircle
+        float t = (progress - singleStraightFrac) / singleCurveFrac;
+        float angle = -PI * 0.5f + t * PI;  // -90 to +90 degrees
+        outPos = Vec3(halfStraight + cosf(angle) * radius, 0, sinf(angle) * radius);
+        outDir = Vec3(-sinf(angle), 0, cosf(angle));
+    }
+    else if (progress < 2.0f * singleStraightFrac + singleCurveFrac)
+    {
+        // Top straight (going -X direction)
+        float t = (progress - singleStraightFrac - singleCurveFrac) / singleStraightFrac;
+        outPos = Vec3(halfStraight - t * straightLength, 0, radius);
+        outDir = Vec3(-1, 0, 0);
+    }
+    else
+    {
+        // Left semicircle
+        float t = (progress - 2.0f * singleStraightFrac - singleCurveFrac) / singleCurveFrac;
+        float angle = PI * 0.5f + t * PI;  // +90 to +270 degrees
+        outPos = Vec3(-halfStraight + cosf(angle) * radius, 0, sinf(angle) * radius);
+        outDir = Vec3(-sinf(angle), 0, cosf(angle));
+    }
+}
+
+// Export scene to PBRT format for reference raytracer
+static bool ExportToPBRT(const D3D12Renderer& renderer, const char* outputPath)
+{
+    std::ofstream file(outputPath);
+    if (!file.is_open())
+        return false;
+
+    file << std::setprecision(6);
+    file << "# PBRT scene exported from cl3d\n";
+    file << "# Render with: pbrt scene.pbrt\n\n";
+
+    // Film settings (match our window size)
+    file << "Film \"rgb\"\n";
+    file << "    \"integer xresolution\" [ 1280 ]\n";
+    file << "    \"integer yresolution\" [ 720 ]\n";
+    file << "    \"string filename\" \"render.exr\"\n\n";
+
+    // Sampler for quality
+    file << "Sampler \"halton\" \"integer pixelsamples\" [ 64 ]\n\n";
+
+    // Integrator - path tracing for realistic shadows
+    file << "Integrator \"volpath\" \"integer maxdepth\" [ 5 ]\n\n";
+
+    // Camera - negate X to convert from D3D12 left-handed to PBRT right-handed
+    const Camera& cam = renderer.camera;
+    Vec3 forward = cam.getForward();
+    Vec3 lookAt = cam.position + forward;
+
+    file << "LookAt " << -cam.position.x << " " << cam.position.y << " " << cam.position.z << "  # eye\n";
+    file << "       " << -lookAt.x << " " << lookAt.y << " " << lookAt.z << "  # look at\n";
+    file << "       0 1 0  # up\n\n";
+
+    file << "Camera \"perspective\"\n";
+    file << "    \"float fov\" [ 60 ]\n\n";
+
+    // Begin world
+    file << "WorldBegin\n\n";
+
+    // Sky dome with cl3d fog color (0.5, 0.6, 0.7)
+    // Use fog color directly - this is what appears at the horizon in cl3d
+    file << "# Sky/ambient lighting\n";
+    file << "LightSource \"infinite\"\n";
+    file << "    \"rgb L\" [ 0.5 0.6 0.7 ]\n\n";
+
+    // Ground plane material - darker to compensate for brighter sky light
+    file << "# Ground plane\n";
+    file << "AttributeBegin\n";
+    float groundReflectance = 0.05f;  // Dark ground to match cl3d appearance
+    file << "    Material \"diffuse\" \"rgb reflectance\" [ " << groundReflectance << " " << groundReflectance << " " << groundReflectance << " ]\n";
+    file << "    Shape \"trianglemesh\"\n";
+    file << "        \"point3 P\" [ -500 0 -500  500 0 -500  500 0 500  -500 0 500 ]\n";
+    file << "        \"integer indices\" [ 0 1 2  0 2 3 ]\n";
+    file << "AttributeEnd\n\n";
+
+    // Car boxes - must match D3D12_Update calculation exactly
+    file << "# Cars (boxes on oval track)\n";
+    const float PI = 3.14159265f;
+    const float carLength = 4.0f;
+    const float carWidth = 2.0f;
+    const float carHeight = 1.5f;
+    const float straightLength = renderer.trackStraightLength;
+    const float radius = renderer.trackRadius;
+    const float trackLength = straightLength * 2.0f + 2.0f * PI * radius;
+
+    // Calculate spacing (must match D3D12_Update)
+    const int carsPerLane = renderer.numCars / 2;
+    const float minGap = 0.5f;
+    float maxSpacingMeters = trackLength / (float)carsPerLane;
+    float minSpacingMeters = carLength + minGap;
+    float currentSpacingMeters = minSpacingMeters + (maxSpacingMeters - minSpacingMeters) * renderer.carSpacing;
+    float spacingFraction = currentSpacingMeters / trackLength;
+
+    // Headlight parameters (must match D3D12_Update)
+    const float headlightHeight = 0.6f;
+    const float headlightSpacing = 0.4f;
+    const float headlightInnerAngle = 15.0f * PI / 180.0f;
+    const float headlightOuterAngle = 20.0f * PI / 180.0f;
+
+    // Store car data for light calculation
+    struct CarData { Vec3 pos; Vec3 dir; Vec3 right; };
+    std::vector<CarData> carData(renderer.numCars);
+
+    for (uint32_t i = 0; i < renderer.numCars; i++)
+    {
+        // Calculate actual progress with lane-based spacing (matches D3D12_Update)
+        int lane = i % 2;
+        int posInLane = i / 2;
+        float baseProgress = renderer.carTrackProgress[lane];  // Lane leader's progress
+        float progress = baseProgress + posInLane * spacingFraction;
+        if (progress >= 1.0f) progress -= 1.0f;
+
+        Vec3 trackPos, trackDir;
+        GetTrackPositionAndDirection(progress, straightLength, radius, trackPos, trackDir);
+
+        Vec3 trackRight(trackDir.z, 0, -trackDir.x);
+        Vec3 carPos = trackPos + trackRight * renderer.carLane[i];
+        carPos.y = carHeight * 0.5f;
+
+        // Store for light calculation
+        carData[i].pos = carPos;
+        carData[i].dir = trackDir;
+        carData[i].right = trackRight;
+
+        file << "AttributeBegin\n";
+        file << "    Material \"diffuse\" \"rgb reflectance\" [ 0.8 0.8 0.8 ]\n";
+
+        // Transform: translate then rotate to align with track direction
+        // Negate X for coordinate system conversion
+        float angle = atan2f(-trackDir.x, trackDir.z) * 180.0f / PI;
+        file << "    Translate " << -carPos.x << " " << carPos.y << " " << carPos.z << "\n";
+        file << "    Rotate " << angle << " 0 1 0\n";
+        file << "    Scale " << carWidth * 0.5f << " " << carHeight * 0.5f << " " << carLength * 0.5f << "\n";
+
+        // Unit cube centered at origin
+        file << "    Shape \"trianglemesh\"\n";
+        file << "        \"point3 P\" [\n";
+        file << "            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1\n";
+        file << "            -1 -1  1  1 -1  1  1 1  1  -1 1  1\n";
+        file << "        ]\n";
+        file << "        \"integer indices\" [\n";
+        file << "            0 2 1  0 3 2  4 5 6  4 6 7\n";
+        file << "            0 1 5  0 5 4  2 3 7  2 7 6\n";
+        file << "            0 4 7  0 7 3  1 2 6  1 6 5\n";
+        file << "        ]\n";
+        file << "AttributeEnd\n\n";
+    }
+
+    // Headlights - calculate positions based on car positions (matches D3D12_Update)
+    file << "# Headlights (spotlights)\n";
+    int numLights = (renderer.activeLightCount > 0) ? renderer.activeLightCount : (int)renderer.numConeLights;
+    int lightsExported = 0;
+
+    for (uint32_t carIdx = 0; carIdx < renderer.numCars && lightsExported < numLights; carIdx++)
+    {
+        const CarData& car = carData[carIdx];
+
+        // Front of car
+        float frontOffset = carLength * 0.5f;
+        Vec3 frontPos = car.pos + car.dir * frontOffset;
+        frontPos.y = headlightHeight;
+
+        // Left headlight (negate X for coordinate system conversion)
+        if (lightsExported < numLights)
+        {
+            Vec3 leftOffset = car.right * (-headlightSpacing);
+            Vec3 lightPos = frontPos + leftOffset;
+            Vec3 lightTarget = lightPos + car.dir * 10.0f;
+            float coneAngle = headlightOuterAngle * 180.0f / PI;
+            float power = renderer.coneLightIntensity * 500.0f;
+
+            file << "AttributeBegin\n";
+            file << "    LightSource \"spot\"\n";
+            file << "        \"point3 from\" [ " << -lightPos.x << " " << lightPos.y << " " << lightPos.z << " ]\n";
+            file << "        \"point3 to\" [ " << -lightTarget.x << " " << lightTarget.y << " " << lightTarget.z << " ]\n";
+            file << "        \"float coneangle\" [ " << coneAngle << " ]\n";
+            file << "        \"float conedeltaangle\" [ 5 ]\n";
+            file << "        \"rgb I\" [ " << 1.5f * power << " " << 1.4f * power << " " << 1.2f * power << " ]\n";
+            file << "AttributeEnd\n\n";
+            lightsExported++;
+        }
+
+        // Right headlight (negate X for coordinate system conversion)
+        if (lightsExported < numLights)
+        {
+            Vec3 rightOffset = car.right * headlightSpacing;
+            Vec3 lightPos = frontPos + rightOffset;
+            Vec3 lightTarget = lightPos + car.dir * 10.0f;
+            float coneAngle = headlightOuterAngle * 180.0f / PI;
+            float power = renderer.coneLightIntensity * 500.0f;
+
+            file << "AttributeBegin\n";
+            file << "    LightSource \"spot\"\n";
+            file << "        \"point3 from\" [ " << -lightPos.x << " " << lightPos.y << " " << lightPos.z << " ]\n";
+            file << "        \"point3 to\" [ " << -lightTarget.x << " " << lightTarget.y << " " << lightTarget.z << " ]\n";
+            file << "        \"float coneangle\" [ " << coneAngle << " ]\n";
+            file << "        \"float conedeltaangle\" [ 5 ]\n";
+            file << "        \"rgb I\" [ " << 1.5f * power << " " << 1.4f * power << " " << 1.2f * power << " ]\n";
+            file << "AttributeEnd\n\n";
+            lightsExported++;
+        }
+    }
+
+    // pbrt-v4 no WorldEnd
+    file.close();
+
+    return true;
 }
 
 // Copy state to clipboard
@@ -713,6 +962,22 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow)
                     }
                     i++;  // Skip next argument
                 }
+                // Check for -generate-ref flag
+                else if (strcmp(arg, "-generate-ref") == 0 && i + 1 < argc)
+                {
+                    g_GenerateRefMode = true;
+                    // Get the next argument as config file
+                    int cfgLen = WideCharToMultiByte(CP_UTF8, 0, argv[i + 1], -1, nullptr, 0, nullptr, nullptr);
+                    if (cfgLen > 0)
+                    {
+                        char* cfgFile = new char[cfgLen];
+                        WideCharToMultiByte(CP_UTF8, 0, argv[i + 1], -1, cfgFile, cfgLen, nullptr, nullptr);
+                        g_GenerateRefConfigFile = cfgFile;
+                        LoadStateFromFile(g_Renderer, cfgFile);
+                        delete[] cfgFile;
+                    }
+                    i++;  // Skip next argument
+                }
                 // Check if it's a .cfg file (for non-test loading)
                 else
                 {
@@ -726,6 +991,31 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow)
             }
         }
         LocalFree(argv);
+    }
+
+    // Handle -generate-ref mode: export and exit immediately
+    if (g_GenerateRefMode)
+    {
+        // Generate output filename from config file
+        std::string outputFile = g_GenerateRefConfigFile;
+        size_t dotPos = outputFile.rfind('.');
+        if (dotPos != std::string::npos)
+            outputFile = outputFile.substr(0, dotPos);
+        outputFile += ".pbrt";
+
+        if (ExportToPBRT(g_Renderer, outputFile.c_str()))
+        {
+            printf("Exported PBRT scene to: %s\n", outputFile.c_str());
+            printf("Render with: pbrt %s\n", outputFile.c_str());
+        }
+        else
+        {
+            printf("ERROR: Failed to export PBRT scene\n");
+        }
+
+        D3D12_Shutdown(&g_Renderer);
+        DestroyWindow(g_Hwnd);
+        return 0;
     }
 
     ShowWindow(g_Hwnd, nCmdShow);
