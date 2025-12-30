@@ -1,0 +1,1063 @@
+# PBRT scene exported from cl3d
+# Render with: pbrt scene.pbrt
+
+Film "rgb"
+    "integer xresolution" [ 1280 ]
+    "integer yresolution" [ 720 ]
+    "string filename" "render.exr"
+
+Sampler "halton" "integer pixelsamples" [ 512 ]
+
+Integrator "volpath" "integer maxdepth" [ 1 ]
+
+LookAt -68.8847 1.86957 -46.7807  # eye
+       -69.5785 1.14943 -46.7923  # look at
+       0 1 0  # up
+
+Camera "perspective"
+    "float fov" [ 60 ]
+
+WorldBegin
+
+# Ambient light (scaled from 0.52)
+LightSource "infinite" "rgb L" [ 0.104 0.104 0.104 ]
+
+# Ground plane
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.15 0.15 0.15 ]
+    Shape "trianglemesh"
+        "point3 P" [ -500 0 -500  500 0 -500  500 0 500  -500 0 500 ]
+        "integer indices" [ 0 1 2  0 2 3 ]
+AttributeEnd
+
+# Cars (boxes on oval track)
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -63.4608 0.75 -48.5
+    Rotate -90 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -63.4608 0.75 -51.5
+    Rotate -90 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -70.1011 0.75 -48.5
+    Rotate -90 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -70.1011 0.75 -51.5
+    Rotate -90 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -76.6887 0.75 -48.4706
+    Rotate -88.0046 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -76.7932 0.75 -51.4688
+    Rotate -88.0046 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -83.0921 0.75 -47.8202
+    Rotate -80.3955 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -83.5926 0.75 -50.7781
+    Rotate -80.3955 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -89.3529 0.75 -46.3276
+    Rotate -72.7863 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -90.2407 0.75 -49.1932
+    Rotate -72.7863 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -95.361 0.75 -44.0191
+    Rotate -65.1771 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -96.6204 0.75 -46.7419
+    Rotate -65.1771 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -101.01 0.75 -40.9354
+    Rotate -57.568 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -102.619 0.75 -43.4675
+    Rotate -57.568 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -106.202 0.75 -37.1307
+    Rotate -49.9588 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -108.132 0.75 -39.4275
+    Rotate -49.9588 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -110.844 0.75 -32.6722
+    Rotate -42.3497 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -113.061 0.75 -34.6931
+    Rotate -42.3497 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -114.854 0.75 -27.6382
+    Rotate -34.7405 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -117.32 0.75 -29.3478
+    Rotate -34.7405 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -118.163 0.75 -22.1175
+    Rotate -27.1313 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -120.833 0.75 -23.4856
+    Rotate -27.1313 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -120.712 0.75 -16.2073
+    Rotate -19.5222 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -123.539 0.75 -17.2098
+    Rotate -19.5222 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -122.455 0.75 -10.0117
+    Rotate -11.913 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -125.391 0.75 -10.631
+    Rotate -11.913 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -123.363 0.75 -3.63973
+    Rotate -4.30387 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -126.355 0.75 -3.86487
+    Rotate -4.30387 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -123.419 0.75 2.79632
+    Rotate 3.30529 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -126.414 0.75 2.96929
+    Rotate 3.30529 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -122.623 0.75 9.18314
+    Rotate 10.9144 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -125.568 0.75 9.75116
+    Rotate 10.9144 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -120.987 0.75 15.4082
+    Rotate 18.5236 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -123.832 0.75 16.3613
+    Rotate 18.5236 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -118.542 0.75 21.3619
+    Rotate 26.1328 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -121.235 0.75 22.6833
+    Rotate 26.1328 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -115.33 0.75 26.9395
+    Rotate 33.7419 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -117.825 0.75 28.6058
+    Rotate 33.7419 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -111.408 0.75 32.0426
+    Rotate 41.3511 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -113.66 0.75 34.0246
+    Rotate 41.3511 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -106.844 0.75 36.5813
+    Rotate 48.9603 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -108.814 0.75 38.8441
+    Rotate 48.9603 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -101.72 0.75 40.4759
+    Rotate 56.5694 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -103.373 0.75 42.9795
+    Rotate 56.5694 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -96.125 0.75 43.6576
+    Rotate 64.1786 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -97.4317 0.75 46.358
+    Rotate 64.1786 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -90.1581 0.75 46.0704
+    Rotate 71.7877 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -91.0957 0.75 48.9201
+    Rotate 71.7877 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -83.9242 0.75 47.6719
+    Rotate 79.3969 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -84.4762 0.75 50.6207
+    Rotate 79.3969 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -77.5332 0.75 48.4338
+    Rotate 87.0061 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -77.6899 0.75 51.4297
+    Rotate 87.0061 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -70.9724 0.75 48.5
+    Rotate 90 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -70.9724 0.75 51.5
+    Rotate 90 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -64.3322 0.75 48.5
+    Rotate 90 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -64.3322 0.75 51.5
+    Rotate 90 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -57.6919 0.75 48.5
+    Rotate 90 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -57.6919 0.75 51.5
+    Rotate 90 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -51.0517 0.75 48.5
+    Rotate 90 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+AttributeBegin
+    Material "diffuse" "rgb reflectance" [ 0.8 0.8 0.8 ]
+    Translate -51.0517 0.75 51.5
+    Rotate 90 0 1 0
+    Scale 1 0.75 2
+    Shape "trianglemesh"
+        "point3 P" [
+            -1 -1 -1  1 -1 -1  1 1 -1  -1 1 -1
+            -1 -1  1  1 -1  1  1 1  1  -1 1  1
+        ]
+        "integer indices" [
+            0 2 1  0 3 2  4 5 6  4 6 7
+            0 1 5  0 5 4  2 3 7  2 7 6
+            0 4 7  0 7 3  1 2 6  1 6 5
+        ]
+AttributeEnd
+
+# Headlights (spotlights)
+AttributeBegin
+    LightSource "spot"
+        "point3 from" [ -65.4608 0.6 -48.1 ]
+        "point3 to" [ -75.4608 0.6 -48.1 ]
+        "float coneangle" [ 20 ]
+        "float conedeltaangle" [ 5 ]
+        "rgb I" [ 135000 126000 108000 ]
+AttributeEnd
+
