@@ -59,6 +59,7 @@ struct CameraConstants
     float overlapMaxCount;    // Max count for heat map coloring
     float disableShadows;     // 1.0 = skip shadow map sampling
     float useHorizonMapping;  // 1.0 = use horizon mapping instead of shadow maps
+    float showGrid;           // 1.0 = show grid pattern on ground
     float horizonWorldMinX;   // Horizon map world space bounds
     float horizonWorldMinZ;
     float horizonWorldSize;
@@ -152,6 +153,7 @@ struct D3D12Renderer
     float headlightRange = 30.0f;  // Range in meters (20-300)
     float headlightFalloff = 2.0f; // Distance falloff exponent (lower = less falloff)
     bool disableShadows = false;   // Skip shadow map sampling
+    bool showGrid = true;          // Show grid pattern on ground
 
     // Car animation
     uint32_t numCars = 0;

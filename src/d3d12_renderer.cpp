@@ -520,6 +520,7 @@ cbuffer CameraConstants : register(b0)
     float overlapMaxCount;
     float disableShadows;
     float useHorizonMapping;
+    float showGrid;
     float horizonWorldMinX;
     float horizonWorldMinZ;
     float horizonWorldSize;
@@ -752,12 +753,19 @@ float4 PSMain(PSInput input) : SV_TARGET
 
     if (isGround)
     {
-        float2 grid = frac(input.uv * 100.0);
-        float lineWidth = 0.02;
-        float gridLine = (grid.x < lineWidth || grid.y < lineWidth) ? 1.0 : 0.0;
         float3 baseColor = float3(0.3, 0.3, 0.3);
-        float3 lineColor = float3(0.2, 0.2, 0.2);
-        color = lerp(baseColor, lineColor, gridLine) * ambientIntensity;
+        if (showGrid > 0.5)
+        {
+            float2 grid = frac(input.uv * 100.0);
+            float lineWidth = 0.02;
+            float gridLine = (grid.x < lineWidth || grid.y < lineWidth) ? 1.0 : 0.0;
+            float3 lineColor = float3(0.2, 0.2, 0.2);
+            color = lerp(baseColor, lineColor, gridLine) * ambientIntensity;
+        }
+        else
+        {
+            color = baseColor * ambientIntensity;
+        }
     }
     else
     {
@@ -2298,6 +2306,7 @@ void D3D12_Render(D3D12Renderer* renderer)
     cb->overlapMaxCount = renderer->overlapMaxCount;
     cb->disableShadows = renderer->disableShadows ? 1.0f : 0.0f;
     cb->useHorizonMapping = renderer->useHorizonMapping ? 1.0f : 0.0f;
+    cb->showGrid = renderer->showGrid ? 1.0f : 0.0f;
     cb->horizonWorldMinX = renderer->horizonWorldMin.x;
     cb->horizonWorldMinZ = renderer->horizonWorldMin.z;
     cb->horizonWorldSize = renderer->horizonWorldSize;

@@ -67,6 +67,7 @@ static std::string SerializeState(const D3D12Renderer& renderer)
     ss << "shadowBias=" << renderer.shadowBias << "\n";
     ss << "disableShadows=" << (renderer.disableShadows ? 1 : 0) << "\n";
     ss << "useHorizonMapping=" << (renderer.useHorizonMapping ? 1 : 0) << "\n";
+    ss << "showGrid=" << (renderer.showGrid ? 1 : 0) << "\n";
 
     // Animation settings
     ss << "carSpeed=" << renderer.carSpeed << "\n";
@@ -122,6 +123,7 @@ static bool DeserializeState(D3D12Renderer& renderer, const std::string& data)
         else if (key == "shadowBias") renderer.shadowBias = std::stof(value);
         else if (key == "disableShadows") renderer.disableShadows = (std::stoi(value) != 0);
         else if (key == "useHorizonMapping") renderer.useHorizonMapping = (std::stoi(value) != 0);
+        else if (key == "showGrid") renderer.showGrid = (std::stoi(value) != 0);
 
         // Animation
         else if (key == "carSpeed") renderer.carSpeed = std::stof(value);
@@ -747,6 +749,7 @@ static void DrawImGui(float deltaTime)
     ImGui::SliderFloat("Shadow Bias", &g_Renderer.shadowBias, -0.5f, 0.5f);
     ImGui::Checkbox("Disable Shadows", &g_Renderer.disableShadows);
     ImGui::Checkbox("Use Horizon Mapping", &g_Renderer.useHorizonMapping);
+    ImGui::Checkbox("Show Grid", &g_Renderer.showGrid);
 
     ImGui::Separator();
     ImGui::Text("Animation");
